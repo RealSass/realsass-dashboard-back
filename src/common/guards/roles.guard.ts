@@ -6,25 +6,30 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Role } from '@prisma/client';
 import { ROLES_KEY } from '../decorators/roles.decorator';
-import { JwtPayload } from '../../auth/interfaces/jwt-payload.interface';
+import type { TenantContext } from '../../tenant/tenant.interface';
+import type { Request } from 'express';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
     if (!requiredRoles || requiredRoles.length === 0) return true;
 
-    const { user } = context.switchToHttp().getRequest<{ user: JwtPayload }>();
+    const request = context.switchToHttp().getRequest<Request>();
+    const tenant = (request as any).tenantContext as TenantContext | undefined;
 
-    if (!requiredRoles.includes(user.role)) {
+    if (!tenant) {
+      throw new ForbiddenException('Contexto de tenant no disponible');
+    }
+
+    if (!requiredRoles.includes(tenant.role)) {
       throw new ForbiddenException(
         'No tenés permisos para realizar esta acción',
       );

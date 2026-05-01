@@ -12,12 +12,16 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  // CORS
+  // CORS — permite headers del ecosistema SSO
   app.enableCors({
-    origin: '*',  // ✅ string directo
+    origin: '*',
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: false, // ⚠️ con origin: '*', credentials DEBE ser false
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-organization-id',   // TenantGuard
+    ],
+    credentials: false,
   });
 
   // Global pipes
@@ -40,6 +44,8 @@ async function bootstrap() {
   await app.listen(port);
 
   logger.log(`🚀 Apple Stock API corriendo en: http://localhost:${port}`);
+  logger.log(`🔥 Firebase Auth SSO activo`);
+  logger.log(`🏢 Multi-tenant habilitado (x-organization-id)`);
 }
 
 bootstrap();

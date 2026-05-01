@@ -1,3 +1,19 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  fix-seed-relations.sh
+#  Corrige prisma/seed.ts: Accesorio y SubAccesorio requieren connect en
+#  AMBAS relaciones: organization + puntoDeVenta
+# =============================================================================
+set -euo pipefail
+
+GREEN='\033[0;32m'; BLUE='\033[0;34m'; YELLOW='\033[1;33m'; NC='\033[0m'
+log()  { echo -e "${BLUE}▶ $1${NC}"; }
+ok()   { echo -e "${GREEN}✔ $1${NC}"; }
+warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
+
+log "Reescribiendo prisma/seed.ts con ambas relaciones (organization + puntoDeVenta)..."
+
+cat > prisma/seed.ts << 'EOF'
 // prisma/seed.ts
 import { PrismaClient, Role } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -225,3 +241,19 @@ async function main() {
 main()
   .catch((e) => { console.error('❌', e); process.exit(1); })
   .finally(async () => { await prisma.$disconnect(); await pool.end(); });
+EOF
+ok "prisma/seed.ts corregido (ambas relaciones con connect)"
+
+# ---------------------------------------------------------------------------
+# Verificar build
+# ---------------------------------------------------------------------------
+log "Ejecutando pnpm run build..."
+pnpm run build && ok "✅ Build exitoso — 0 errores" || {
+  warn "Build falló. Revisá los errores arriba."
+  exit 1
+}
+
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  ✅ Completado${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"

@@ -2,48 +2,39 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   HttpCode,
   HttpStatus,
-  UseGuards,
+  Request,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
-import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
-import { JwtAccessGuard } from './guards/jwt-access.guard';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { Public } from '../common/decorators/public.decorator';
+import type { Request as ExpressRequest } from 'express';
 
-@Controller('auth')
+@Controller('api/v1/auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  /**
+   * POST /api/v1/auth/sync
+   * Público — el ID token de Firebase se valida en el guard a nivel global.
+   * El frontend llama este endpoint justo después del login de Firebase.
+   */
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  sync(@Body() dto: SyncAuthDto) {
+    return this.authService.sync(dto);
   }
 
-  @Post('login')
-  @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
-  }
-
-  @UseGuards(JwtRefreshGuard)
-  @Post('refresh')
-  @HttpCode(HttpStatus.OK)
-  refresh(
-    @CurrentUser() user: JwtPayload & { refreshToken: string },
-  ) {
-    return this.authService.refreshTokens(user.sub, user.refreshToken);
-  }
-
-  @UseGuards(JwtAccessGuard)
-  @Post('logout')
-  @HttpCode(HttpStatus.OK)
-  logout(@CurrentUser('sub') userId: string) {
-    return this.authService.logout(userId);
+  /**
+   * GET /api/v1/auth/me
+   * Protegido por FirebaseAuthGuard (global).
+   */
+  @Get('me')
+  me(@Request() req: ExpressRequest) {
+    const firebaseUid = (req as any).user?.firebaseUid as string;
+    return this.authService.me(firebaseUid);
   }
 }

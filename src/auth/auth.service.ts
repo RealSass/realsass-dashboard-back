@@ -1,142 +1,84 @@
 // src/auth/auth.service.ts
-import {
-  Injectable,
-  ConflictException,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
-import * as bcrypt from 'bcrypt';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
-import { JwtPayload } from './interfaces/jwt-payload.interface';
-
-const SALT_ROUNDS = 10;
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
-    private prisma: PrismaService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
   ) {}
 
-  async register(dto: RegisterDto) {
-    const exists = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-    if (exists) {
-      throw new ConflictException('Ya existe un usuario con ese email');
-    }
-
-    const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
-
-    const user = await this.prisma.user.create({
-      data: {
+  /**
+   * POST /api/v1/auth/sync
+   * Upsert del usuario en base al firebaseUid.
+   * Se llama desde el frontend justo después de que Firebase emite un ID token.
+   */
+  async sync(dto: SyncAuthDto) {
+    const user = await this.prisma.user.upsert({
+      where: { firebaseUid: dto.firebaseUid },
+      create: {
+        firebaseUid: dto.firebaseUid,
+        firebaseEmail: dto.email,
         email: dto.email,
-        nombre: dto.nombre,
-        passwordHash,
-        role: dto.role,
+        nombre: dto.nombre ?? dto.email.split('@')[0],
+        role: 'VENDEDOR',
+      },
+      update: {
+        firebaseEmail: dto.email,
+        email: dto.email,
+        ...(dto.nombre && { nombre: dto.nombre }),
+      },
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        firebaseUid: true,
+        isActive: true,
+        createdAt: true,
       },
     });
 
-    const tokens = await this.generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
+    await this.audit.log({
+      action: 'auth.sync',
+      entityType: 'User',
+      entityId: user.id,
+      userId: user.id,
+      payload: { email: dto.email },
     });
 
-    await this.saveRefreshToken(user.id, tokens.refreshToken);
-
-    return {
-      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
-      ...tokens,
-    };
+    return user;
   }
 
-  async login(dto: LoginDto) {
+  /**
+   * GET /api/v1/auth/me
+   * Retorna el perfil del usuario autenticado.
+   */
+  async me(firebaseUid: string) {
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { firebaseUid },
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        firebaseUid: true,
+        isActive: true,
+        createdAt: true,
+      },
     });
 
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('Credenciales inválidas');
+    if (!user) {
+      throw new NotFoundException(
+        'Usuario no encontrado. Llamar a /auth/sync primero.',
+      );
     }
 
-    const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!passwordMatch) {
-      throw new UnauthorizedException('Credenciales inválidas');
-    }
-
-    const tokens = await this.generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    });
-
-    await this.saveRefreshToken(user.id, tokens.refreshToken);
-
-    return {
-      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
-      ...tokens,
-    };
-  }
-
-  async refreshTokens(userId: string, refreshToken: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-
-    if (!user || !user.refreshToken || !user.isActive) {
-      throw new UnauthorizedException('Acceso denegado');
-    }
-
-    const tokenMatch = await bcrypt.compare(refreshToken, user.refreshToken);
-    if (!tokenMatch) {
-      throw new UnauthorizedException('Refresh token inválido');
-    }
-
-    const tokens = await this.generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    });
-
-    await this.saveRefreshToken(user.id, tokens.refreshToken);
-
-    return tokens;
-  }
-
-  async logout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken: null },
-    });
-    return { message: 'Sesión cerrada correctamente' };
-  }
-
-  // ─────────────────────────────────────────────
-  // HELPERS PRIVADOS
-  // ─────────────────────────────────────────────
-
-  private async generateTokens(payload: JwtPayload) {
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
-        expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m') as any,
-      }),
-      this.jwtService.signAsync(payload, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d') as any,
-      }),
-    ]);
-    return { accessToken, refreshToken };
-  }
-
-  private async saveRefreshToken(userId: string, refreshToken: string) {
-    const hashedRefresh = await bcrypt.hash(refreshToken, SALT_ROUNDS);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken: hashedRefresh },
-    });
+    return user;
   }
 }

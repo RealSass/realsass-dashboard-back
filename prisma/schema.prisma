@@ -1,4 +1,12 @@
 // prisma/schema.prisma
+// ─────────────────────────────────────────────────────────────────────────────
+// Apple Stock — Schema final con Firebase Auth SSO + multi-tenancy
+// INSTRUCCIONES:
+//   1. Reemplazar prisma/schema.prisma con este archivo
+//   2. pnpm prisma migrate dev --name add_firebase_multitenant
+//   3. pnpm prisma generate
+// ─────────────────────────────────────────────────────────────────────────────
+
 generator client {
   provider   = "prisma-client-js"
   output     = "../node_modules/.prisma/client"
@@ -9,51 +17,123 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─────────────────────────────────────────
-// AUTH
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
 
 enum Role {
   ADMIN
   VENDEDOR
+  VIEWER
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH — Usuario ahora tiene firebaseUid como identidad principal
+// El passwordHash queda nullable para migración gradual.
+// Un usuario puede autenticarse con Firebase o con el JWT legacy (deprecado).
+// ─────────────────────────────────────────────────────────────────────────────
+
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  nombre       String
-  passwordHash String   @map("password_hash")
-  role         Role     @default(VENDEDOR)
-  refreshToken String?  @map("refresh_token")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  email         String   @unique
+  nombre        String
+
+  // Firebase SSO — identidad principal en el ecosistema
+  firebaseUid   String?  @unique @map("firebase_uid")
+  firebaseEmail String?  @map("firebase_email")
+
+  // JWT legacy — nullable: se mantiene para usuarios existentes hasta migración
+  passwordHash  String?  @map("password_hash")
+  refreshToken  String?  @map("refresh_token")
+
+  role          Role     @default(VENDEDOR)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relaciones
+  auditLogs     AuditLog[]
 
   @@index([email])
+  @@index([firebaseUid])
   @@map("users")
 }
 
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ORGANIZACIONES — Tenant raíz del ecosistema
+// enabledProducts y systemSettings son JSONB: nunca migrar para agregar sistema.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique
+  // JSONB — ej: { "applestock": true, "payments": false, "chat": true, "ads": true }
+  enabledProducts Json     @default("{}") @map("enabled_products")
+  // JSONB — configuración global de la org por sistema
+  systemSettings  Json     @default("{}") @map("system_settings")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relaciones
+  puntosDeVenta PuntoDeVenta[]
+  accesorios    Accesorio[]
+  subAccesorios SubAccesorio[]
+  auditLogs     AuditLog[]
+
+  @@index([slug])
+  @@map("organizations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUNTOS DE VENTA — Ahora pertenecen a una organización
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PuntoDeVenta {
+  id             String       @id @default(uuid())
+  nombre         String
+  direccion      String?
+  ciudad         String?
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  accesorios     Accesorio[]
+  subAccesorios  SubAccesorio[]
+
+  @@index([organizationId])
+  @@map("puntos_de_venta")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ACCESORIOS DE MARCA (ej. funda para iPhone 17 Pro)
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Accesorio {
-  id          String   @id @default(uuid())
-  nombre      String                      // ej. "iPhone 17"
-  modelo      String                      // ej. "Pro"
-  tipo        String                      // ej. "Funda", "Templado"
-  descripcion String?
-  cantidad    Int      @default(0)
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  nombre         String
+  modelo         String
+  tipo           String
+  descripcion    String?
+  cantidad       Int      @default(0)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  colores  AccesorioColor[]
-  imagenes AccesorioImagen[]
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
 
   puntoDeVentaId String       @map("punto_de_venta_id")
   puntoDeVenta   PuntoDeVenta @relation(fields: [puntoDeVentaId], references: [id])
 
+  colores        AccesorioColor[]
+  imagenes       AccesorioImagen[]
+
+  @@index([organizationId])
   @@index([puntoDeVentaId])
   @@index([nombre])
   @@index([tipo])
@@ -84,26 +164,30 @@ model AccesorioImagen {
   @@map("accesorio_imagenes")
 }
 
-// ─────────────────────────────────────────
-// ACCESORIOS GENÉRICOS (sin marca, ej. cable USB-C genérico)
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ACCESORIOS GENÉRICOS (sin marca, ej. cable USB-C)
+// ─────────────────────────────────────────────────────────────────────────────
 
 model SubAccesorio {
-  id          String   @id @default(uuid())
-  nombre      String                      // ej. "Cable USB-C"
-  tipo        String                      // ej. "Cable", "Cargador"
-  descripcion String?
-  cantidad    Int      @default(0)
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  nombre         String
+  tipo           String
+  descripcion    String?
+  cantidad       Int      @default(0)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  colores  SubAccesorioColor[]
-  imagenes SubAccesorioImagen[]
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
 
   puntoDeVentaId String       @map("punto_de_venta_id")
   puntoDeVenta   PuntoDeVenta @relation(fields: [puntoDeVentaId], references: [id])
 
+  colores        SubAccesorioColor[]
+  imagenes       SubAccesorioImagen[]
+
+  @@index([organizationId])
   @@index([puntoDeVentaId])
   @@index([nombre])
   @@index([tipo])
@@ -134,22 +218,29 @@ model SubAccesorioImagen {
   @@map("sub_accesorio_imagenes")
 }
 
-// ─────────────────────────────────────────
-// PUNTOS DE VENTA
-// ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT LOG — append-only, nunca se borra
+// ─────────────────────────────────────────────────────────────────────────────
 
+model AuditLog {
+  id             String   @id @default(uuid())
+  action         String                         // ej: "accesorio.create"
+  entityType     String   @map("entity_type")   // ej: "Accesorio"
+  entityId       String?  @map("entity_id")
+  payload        Json     @default("{}")         // diff o datos relevantes
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at")
 
-model PuntoDeVenta {
-  id        String   @id @default(uuid())
-  nombre    String
-  direccion String?
-  ciudad    String?
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  userId         String?      @map("user_id")
+  user           User?        @relation(fields: [userId], references: [id])
 
-  accesorios    Accesorio[]
-  subAccesorios SubAccesorio[]
+  organizationId String?      @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id])
 
-  @@map("puntos_de_venta")
+  @@index([organizationId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
