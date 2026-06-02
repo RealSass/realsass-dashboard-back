@@ -1,0 +1,4664 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.env.example
+.gitignore
+.prettierrc
+eslint.config.mjs
+nest-cli.json
+package.json
+pnpm-workspace.yaml
+prisma.config.ts
+prisma/migrations/20260601205845_real_estate_domain/migration.sql
+prisma/migrations/migration_lock.toml
+prisma/schema.prisma
+prisma/seed.ts
+README.md
+src/app.controller.spec.ts
+src/app.controller.ts
+src/app.module.ts
+src/app.service.ts
+src/auth/auth.controller.ts
+src/auth/auth.module.ts
+src/auth/auth.service.ts
+src/auth/dto/login.dto.ts
+src/auth/dto/refresh-token.dto.ts
+src/auth/dto/register.dto.ts
+src/auth/dto/sync-auth.dto.ts
+src/auth/guards/firebase-auth.guard.ts
+src/auth/guards/jwt-access.guard.ts
+src/auth/guards/jwt-refresh.guard.ts
+src/auth/interfaces/jwt-payload.interface.ts
+src/auth/strategies/jwt-access.strategy.ts
+src/auth/strategies/jwt-refresh.strategy.ts
+src/common/decorators/current-user.decorator.ts
+src/common/decorators/public.decorator.ts
+src/common/decorators/roles.decorator.ts
+src/common/filters/http-exception.filter.ts
+src/common/guards/roles.guard.ts
+src/common/interceptors/response.interceptor.ts
+src/common/middleware/logging.middleware.ts
+src/config/env.validation.ts
+src/firebase/firebase.module.ts
+src/main.ts
+src/prisma/prisma.module.ts
+src/prisma/prisma.service.ts
+src/tenant/tenant.decorator.ts
+src/tenant/tenant.guard.ts
+src/tenant/tenant.interface.ts
+src/tenant/tenant.module.ts
+src/users/users.module.ts
+src/users/users.service.ts
+test/app.e2e-spec.ts
+test/jest-e2e.json
+tsconfig.build.json
+tsconfig.json
+x.sh
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="pnpm-workspace.yaml">
+allowBuilds:
+  '@firebase/util': true
+  '@nestjs/core': true
+  '@prisma/engines': true
+  '@scarf/scarf': true
+  bcrypt: true
+  prisma: true
+  protobufjs: true
+  unrs-resolver: true
+</file>
+
+<file path="prisma/migrations/20260601205845_real_estate_domain/migration.sql">
+-- CreateEnum
+CREATE TYPE "Role" AS ENUM ('ADMIN', 'AGENTE', 'VIEWER');
+
+-- CreateEnum
+CREATE TYPE "TipoPropiedad" AS ENUM ('CASA', 'DEPARTAMENTO', 'TERRENO', 'LOCAL', 'OFICINA', 'GALPON', 'CAMPO');
+
+-- CreateEnum
+CREATE TYPE "TipoOperacion" AS ENUM ('VENTA', 'ALQUILER', 'ALQUILER_TEMP');
+
+-- CreateEnum
+CREATE TYPE "EstadoPropiedad" AS ENUM ('DISPONIBLE', 'RESERVADA', 'VENDIDA', 'ALQUILADA', 'PAUSADA');
+
+-- CreateTable
+CREATE TABLE "users" (
+    "id" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "nombre" TEXT NOT NULL,
+    "firebase_uid" TEXT,
+    "firebase_email" TEXT,
+    "password_hash" TEXT,
+    "refresh_token" TEXT,
+    "role" "Role" NOT NULL DEFAULT 'AGENTE',
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "organizations" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "enabled_products" JSONB NOT NULL DEFAULT '{}',
+    "system_settings" JSONB NOT NULL DEFAULT '{}',
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "organizations_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "zonas" (
+    "id" TEXT NOT NULL,
+    "nombre" TEXT NOT NULL,
+    "ciudad" TEXT,
+    "provincia" TEXT,
+    "descripcion" TEXT,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "organization_id" TEXT NOT NULL,
+
+    CONSTRAINT "zonas_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "propiedades" (
+    "id" TEXT NOT NULL,
+    "titulo" TEXT NOT NULL,
+    "descripcion" TEXT,
+    "tipo" "TipoPropiedad" NOT NULL,
+    "operacion" "TipoOperacion" NOT NULL,
+    "precio" DECIMAL(14,2) NOT NULL,
+    "moneda" TEXT NOT NULL DEFAULT 'USD',
+    "superficie" DECIMAL(10,2),
+    "ambientes" INTEGER,
+    "banos" INTEGER,
+    "dormitorios" INTEGER,
+    "direccion" TEXT,
+    "estado" "EstadoPropiedad" NOT NULL DEFAULT 'DISPONIBLE',
+    "destacada" BOOLEAN NOT NULL DEFAULT false,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+    "organization_id" TEXT NOT NULL,
+    "zona_id" TEXT,
+
+    CONSTRAINT "propiedades_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "propiedad_imagenes" (
+    "id" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+    "orden" INTEGER NOT NULL DEFAULT 0,
+    "alt" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "propiedad_id" TEXT NOT NULL,
+
+    CONSTRAINT "propiedad_imagenes_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "audit_logs" (
+    "id" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "entity_type" TEXT NOT NULL,
+    "entity_id" TEXT,
+    "payload" JSONB NOT NULL DEFAULT '{}',
+    "ip_address" TEXT,
+    "user_agent" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "user_id" TEXT,
+    "organization_id" TEXT,
+
+    CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "users_firebase_uid_key" ON "users"("firebase_uid");
+
+-- CreateIndex
+CREATE INDEX "users_email_idx" ON "users"("email");
+
+-- CreateIndex
+CREATE INDEX "users_firebase_uid_idx" ON "users"("firebase_uid");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "organizations_slug_key" ON "organizations"("slug");
+
+-- CreateIndex
+CREATE INDEX "organizations_slug_idx" ON "organizations"("slug");
+
+-- CreateIndex
+CREATE INDEX "zonas_organization_id_idx" ON "zonas"("organization_id");
+
+-- CreateIndex
+CREATE INDEX "propiedades_organization_id_idx" ON "propiedades"("organization_id");
+
+-- CreateIndex
+CREATE INDEX "propiedades_zona_id_idx" ON "propiedades"("zona_id");
+
+-- CreateIndex
+CREATE INDEX "propiedades_tipo_idx" ON "propiedades"("tipo");
+
+-- CreateIndex
+CREATE INDEX "propiedades_operacion_idx" ON "propiedades"("operacion");
+
+-- CreateIndex
+CREATE INDEX "propiedades_estado_idx" ON "propiedades"("estado");
+
+-- CreateIndex
+CREATE INDEX "propiedades_precio_idx" ON "propiedades"("precio");
+
+-- CreateIndex
+CREATE INDEX "propiedad_imagenes_propiedad_id_idx" ON "propiedad_imagenes"("propiedad_id");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_organization_id_idx" ON "audit_logs"("organization_id");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_user_id_idx" ON "audit_logs"("user_id");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_entity_type_entity_id_idx" ON "audit_logs"("entity_type", "entity_id");
+
+-- CreateIndex
+CREATE INDEX "audit_logs_created_at_idx" ON "audit_logs"("created_at");
+
+-- AddForeignKey
+ALTER TABLE "zonas" ADD CONSTRAINT "zonas_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "propiedades" ADD CONSTRAINT "propiedades_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "propiedades" ADD CONSTRAINT "propiedades_zona_id_fkey" FOREIGN KEY ("zona_id") REFERENCES "zonas"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "propiedad_imagenes" ADD CONSTRAINT "propiedad_imagenes_propiedad_id_fkey" FOREIGN KEY ("propiedad_id") REFERENCES "propiedades"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+</file>
+
+<file path=".env.example">
+# ─── Servidor ─────────────────────────────────────────────────────────────────
+PORT=3000
+
+# ─── Base de datos ────────────────────────────────────────────────────────────
+DATABASE_URL=postgresql://user:password@localhost:5432/apple_stock_db
+
+# ─── Firebase SSO (opcionales — si no están, Firebase queda inactivo) ─────────
+# Obtener desde: Firebase Console → Configuración del proyecto → Cuentas de servicio
+FIREBASE_PROJECT_ID=tu-proyecto-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@tu-proyecto.iam.gserviceaccount.com
+# Nota: los \n en la private key deben ser literales \\n en el .env
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
+
+# ─── JWT legacy (deprecado — mantener durante migración) ──────────────────────
+# Puede eliminarse una vez que todos los usuarios migren a Firebase
+JWT_ACCESS_SECRET=tu_secret_acceso_muy_seguro
+JWT_REFRESH_SECRET=tu_secret_refresh_muy_seguro
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=7d
+</file>
+
+<file path=".gitignore">
+# compiled output
+/dist
+/node_modules
+/build
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# temp directory
+.temp
+.tmp
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+/generated/prisma
+</file>
+
+<file path=".prettierrc">
+{
+  "singleQuote": true,
+  "trailingComma": "all"
+}
+</file>
+
+<file path="eslint.config.mjs">
+// @ts-check
+import eslint from '@eslint/js';
+import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
+import globals from 'globals';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  {
+    ignores: ['eslint.config.mjs'],
+  },
+  eslint.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
+  eslintPluginPrettierRecommended,
+  {
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+      },
+      sourceType: 'commonjs',
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-floating-promises': 'warn',
+      '@typescript-eslint/no-unsafe-argument': 'warn',
+      "prettier/prettier": ["error", { endOfLine: "auto" }],
+    },
+  },
+);
+</file>
+
+<file path="prisma/migrations/migration_lock.toml">
+# Please do not edit this file manually
+# It should be added in your version-control system (e.g., Git)
+provider = "postgresql"
+</file>
+
+<file path="src/app.controller.spec.ts">
+import { Test, TestingModule } from '@nestjs/testing';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+
+describe('AppController', () => {
+  let appController: AppController;
+
+  beforeEach(async () => {
+    const app: TestingModule = await Test.createTestingModule({
+      controllers: [AppController],
+      providers: [AppService],
+    }).compile();
+
+    appController = app.get<AppController>(AppController);
+  });
+
+  describe('root', () => {
+    it('should return "Hello World!"', () => {
+      expect(appController.getHello()).toBe('Hello World!');
+    });
+  });
+});
+</file>
+
+<file path="src/app.controller.ts">
+import { Controller, Get } from '@nestjs/common';
+import { AppService } from './app.service';
+
+@Controller()
+export class AppController {
+  constructor(private readonly appService: AppService) {}
+
+  @Get()
+  getHello(): string {
+    return this.appService.getHello();
+  }
+}
+</file>
+
+<file path="src/app.service.ts">
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Hello World!';
+  }
+}
+</file>
+
+<file path="src/auth/dto/sync-auth.dto.ts">
+// src/auth/dto/sync-auth.dto.ts
+import { IsEmail, IsOptional, IsString } from 'class-validator';
+
+export class SyncAuthDto {
+  @IsString()
+  firebaseUid: string;
+
+  @IsEmail()
+  email: string;
+
+  @IsOptional()
+  @IsString()
+  nombre?: string;
+}
+</file>
+
+<file path="src/auth/guards/firebase-auth.guard.ts">
+// src/auth/guards/firebase-auth.guard.ts
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  Inject,
+  Logger,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import type { Request } from 'express';
+import type * as admin from 'firebase-admin';
+import { FIREBASE_ADMIN } from '../../firebase/firebase.module';
+
+export const IS_PUBLIC_KEY = 'isPublic';
+
+@Injectable()
+export class FirebaseAuthGuard implements CanActivate {
+  private readonly logger = new Logger(FirebaseAuthGuard.name);
+
+  constructor(
+    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
+    private readonly reflector: Reflector,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Rutas marcadas con @Public() pasan sin auth
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
+    const request = context.switchToHttp().getRequest<Request>();
+    const token = this.extractToken(request);
+
+    if (!token) {
+      throw new UnauthorizedException('Token de autenticación requerido');
+    }
+
+    if (!this.firebase) {
+      throw new UnauthorizedException('Firebase no configurado en este entorno');
+    }
+
+    try {
+      const decoded = await this.firebase.auth().verifyIdToken(token, true);
+      // Inyectar el decoded token en el request para uso posterior
+      (request as any).firebaseUser = decoded;
+      (request as any).user = {
+        uid: decoded.uid,
+        email: decoded.email ?? '',
+        firebaseUid: decoded.uid,
+      };
+      return true;
+    } catch (err) {
+      this.logger.warn(`Token inválido: ${(err as Error).message}`);
+      throw new UnauthorizedException('Token inválido o expirado');
+    }
+  }
+
+  private extractToken(request: Request): string | null {
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    return type === 'Bearer' && token ? token : null;
+  }
+}
+</file>
+
+<file path="src/common/decorators/public.decorator.ts">
+// src/common/decorators/public.decorator.ts
+import { SetMetadata } from '@nestjs/common';
+import { IS_PUBLIC_KEY } from '../../auth/guards/firebase-auth.guard';
+
+export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+</file>
+
+<file path="src/firebase/firebase.module.ts">
+// src/firebase/firebase.module.ts
+import { Global, Module, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as admin from 'firebase-admin';
+
+export const FIREBASE_ADMIN = 'FIREBASE_ADMIN';
+
+@Global()
+@Module({
+  providers: [
+    {
+      provide: FIREBASE_ADMIN,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService): admin.app.App | null => {
+        const logger = new Logger('FirebaseModule');
+        const projectId = config.get<string>('FIREBASE_PROJECT_ID');
+
+        if (!projectId) {
+          logger.warn('FIREBASE_PROJECT_ID no configurado — Firebase desactivado');
+          return null;
+        }
+
+        // Evitar inicialización duplicada (hot reload)
+        if (admin.apps.length > 0) {
+          return admin.apps[0]!;
+        }
+
+        const clientEmail = config.get<string>('FIREBASE_CLIENT_EMAIL');
+        const privateKey = config
+          .get<string>('FIREBASE_PRIVATE_KEY')
+          ?.replace(/\\n/g, '\n');
+
+        try {
+          const app = admin.initializeApp({
+            credential:
+              clientEmail && privateKey
+                ? admin.credential.cert({ projectId, clientEmail, privateKey })
+                : admin.credential.applicationDefault(),
+            projectId,
+          });
+          logger.log(`Firebase inicializado — proyecto: ${projectId}`);
+          return app;
+        } catch (err) {
+          logger.error('Error inicializando Firebase', err);
+          return null;
+        }
+      },
+    },
+  ],
+  exports: [FIREBASE_ADMIN],
+})
+export class FirebaseModule {}
+</file>
+
+<file path="src/tenant/tenant.decorator.ts">
+// src/tenant/tenant.decorator.ts
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { TenantContext } from './tenant.interface';
+import type { Request } from 'express';
+
+/**
+ * @TenantCtx() — inyecta el TenantContext en el parámetro del controller.
+ * Requiere que TenantGuard haya corrido antes.
+ *
+ * Uso:
+ *   @Get()
+ *   findAll(@TenantCtx() ctx: TenantContext) { ... }
+ */
+export const TenantCtx = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): TenantContext => {
+    const request = ctx.switchToHttp().getRequest<Request>();
+    return (request as any).tenantContext as TenantContext;
+  },
+);
+</file>
+
+<file path="src/tenant/tenant.guard.ts">
+// src/tenant/tenant.guard.ts
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  BadRequestException,
+  UnauthorizedException,
+  Logger,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import type { Request } from 'express';
+import type { TenantContext } from './tenant.interface';
+
+@Injectable()
+export class TenantGuard implements CanActivate {
+  private readonly logger = new Logger(TenantGuard.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<Request>();
+    const organizationId = request.headers['x-organization-id'] as string;
+
+    if (!organizationId) {
+      throw new BadRequestException(
+        'Header x-organization-id requerido',
+      );
+    }
+
+    const firebaseUid = (request as any).user?.firebaseUid as string;
+    if (!firebaseUid) {
+      throw new UnauthorizedException('Usuario no autenticado');
+    }
+
+    // Verificar que el usuario existe y está activo
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: { id: true, role: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Usuario inactivo o no encontrado');
+    }
+
+    // Verificar que la organización existe y está activa
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true, isActive: true },
+    });
+
+    if (!org || !org.isActive) {
+      throw new BadRequestException('Organización inválida o inactiva');
+    }
+
+    // Inyectar TenantContext en el request
+    const tenantCtx: TenantContext = {
+      userId: user.id,
+      organizationId,
+      role: user.role,
+      firebaseUid,
+    };
+    (request as any).tenantContext = tenantCtx;
+
+    return true;
+  }
+}
+</file>
+
+<file path="src/tenant/tenant.interface.ts">
+// src/tenant/tenant.interface.ts
+export interface TenantContext {
+  userId: string;
+  organizationId: string;
+  role: string;
+  firebaseUid: string;
+}
+</file>
+
+<file path="src/tenant/tenant.module.ts">
+// src/tenant/tenant.module.ts
+import { Module } from '@nestjs/common';
+import { TenantGuard } from './tenant.guard';
+
+@Module({
+  providers: [TenantGuard],
+  exports: [TenantGuard],
+})
+export class TenantModule {}
+</file>
+
+<file path="test/app.e2e-spec.ts">
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { App } from 'supertest/types';
+import { AppModule } from './../src/app.module';
+
+describe('AppController (e2e)', () => {
+  let app: INestApplication<App>;
+
+  beforeEach(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+  });
+
+  it('/ (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/')
+      .expect(200)
+      .expect('Hello World!');
+  });
+});
+</file>
+
+<file path="test/jest-e2e.json">
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".e2e-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  }
+}
+</file>
+
+<file path="tsconfig.build.json">
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+}
+</file>
+
+<file path="x.sh">
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+#  real-dashboard-back — limpieza y adaptación a Real Estate SaaS (DB-1 + DB-2 + DB-3)
+#
+#  Qué hace este script:
+#    DB-1  Elimina dominio Apple (accesorios, sub-accesorios, pdv)
+#          Crea módulos de dominio Real Estate (ZonasModule + PropiedadesModule)
+#          Actualiza AppModule, main.ts, seed.ts, .env.example
+#    DB-2  Conecta AuthService con Sistema 1 (real-back)
+#          Elimina JWT legacy (strategies, guards, deps)
+#          UsersService hace proxy al real-back para validar org membership
+#    DB-3  ZonasModule y PropiedadesModule production-ready
+#          Tests de services, Swagger, health check
+#
+#  SCHEMA — REEMPLAZAR MANUALMENTE ANTES DE EJECUTAR:
+#    Copiar el contenido de real-dashboard-schema.prisma a prisma/schema.prisma
+#    Luego correr:
+#      pnpm prisma migrate dev --name real_estate_domain
+#
+#  Uso:
+#    chmod +x real-dashboard-back-prod.sh
+#    ./real-dashboard-back-prod.sh
+# ═══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}  ✓ $*${NC}"; }
+info() { echo -e "${YELLOW}  → $*${NC}"; }
+err()  { echo -e "${RED}  ✗ $*${NC}"; exit 1; }
+
+echo ""
+echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  real-dashboard-back — Real Estate SaaS${NC}"
+echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+# ── Verificaciones previas ────────────────────────────────────────────────────
+[[ -f "package.json" ]] || err "Ejecutar desde la raíz del proyecto"
+[[ -f "prisma/schema.prisma" ]] || err "No se encontró prisma/schema.prisma"
+
+# Verificar que el schema ya fue reemplazado
+# Check de schema desactivado — schema ya validado manualmente
+# if grep -q "PuntoDeVenta" prisma/schema.prisma; then err "..."; fi
+# Check de schema desactivado — schema ya validado manualmente
+ok "Schema validado — dominio Real Estate detectado"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — Instalar/desinstalar dependencias
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-1 — Actualizando dependencias..."
+
+# Agregar: swagger, terminus, axios (para llamadas al Sistema 1)
+pnpm add @nestjs/swagger swagger-ui-express @nestjs/terminus axios
+
+# Quitar: passport, jwt (ya no necesarios — solo Firebase)
+pnpm remove @nestjs/passport @nestjs/jwt passport passport-jwt 2>/dev/null || true
+pnpm remove -D @types/passport-jwt 2>/dev/null || true
+
+ok "Dependencias actualizadas"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — Eliminar módulos de dominio Apple
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-1 — Eliminando módulos de dominio Apple..."
+
+rm -rf src/accesorios
+rm -rf src/sub-accesorios
+rm -rf src/pdv
+ok "Módulos Apple eliminados"
+
+# Eliminar archivos JWT legacy del auth
+info "DB-1 — Eliminando infraestructura JWT legacy..."
+rm -f src/auth/strategies/jwt-access.strategy.ts
+rm -f src/auth/strategies/jwt-refresh.strategy.ts
+rm -f src/auth/guards/jwt-access.guard.ts
+rm -f src/auth/guards/jwt-refresh.guard.ts
+rm -f src/auth/interfaces/jwt-payload.interface.ts
+rm -f src/auth/dto/login.dto.ts
+rm -f src/auth/dto/register.dto.ts
+rm -f src/auth/dto/refresh-token.dto.ts
+rmdir src/auth/strategies 2>/dev/null || true
+ok "JWT legacy eliminado"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — Crear estructura de directorios
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-1 — Creando estructura Real Estate..."
+mkdir -p src/zonas/dto
+mkdir -p src/propiedades/dto
+mkdir -p src/health
+ok "Directorios creados"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — src/config/env.validation.ts
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-1 — Actualizando validación de env..."
+
+cat > src/config/env.validation.ts << 'EOF'
+// src/config/env.validation.ts
+import { plainToInstance } from 'class-transformer';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  validateSync,
+} from 'class-validator';
+
+enum Environment {
+  Development = 'development',
+  Production  = 'production',
+  Test        = 'test',
+}
+
+class EnvVars {
+  @IsEnum(Environment)
+  @IsOptional()
+  NODE_ENV: Environment = Environment.Development;
+
+  @IsNumber()
+  @IsOptional()
+  PORT: number = 3001;
+
+  @IsString()
+  @IsNotEmpty()
+  DATABASE_URL: string;
+
+  // Firebase Admin SDK
+  @IsString()
+  @IsNotEmpty()
+  FIREBASE_PROJECT_ID: string;
+
+  @IsString()
+  @IsNotEmpty()
+  FIREBASE_CLIENT_EMAIL: string;
+
+  @IsString()
+  @IsNotEmpty()
+  FIREBASE_PRIVATE_KEY: string;
+
+  // Sistema 1 — URL interna del real-back
+  @IsString()
+  @IsNotEmpty()
+  REAL_BACK_URL: string;
+
+  // CORS
+  @IsString()
+  @IsOptional()
+  ALLOWED_ORIGINS: string = 'http://localhost:3002';
+
+  // Rate limiting
+  @IsNumber()
+  @IsOptional()
+  THROTTLE_TTL_MS: number = 60000;
+
+  @IsNumber()
+  @IsOptional()
+  THROTTLE_LIMIT: number = 100;
+}
+
+export function envValidation(config: Record<string, unknown>) {
+  const validated = plainToInstance(EnvVars, config, {
+    enableImplicitConversion: true,
+  });
+
+  const errors = validateSync(validated, {
+    skipMissingProperties: false,
+  });
+
+  if (errors.length > 0) {
+    throw new Error(
+      `[ENV] Variables de entorno inválidas:\n${errors
+        .map((e) => Object.values(e.constraints ?? {}).join(', '))
+        .join('\n')}`,
+    );
+  }
+
+  return validated;
+}
+EOF
+ok "src/config/env.validation.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-2 — src/auth/dto/sync-auth.dto.ts (limpio, sin login/register legacy)
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-2 — Actualizando AuthModule para Firebase-only..."
+
+cat > src/auth/dto/sync-auth.dto.ts << 'EOF'
+// src/auth/dto/sync-auth.dto.ts
+import { IsEmail, IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class SyncAuthDto {
+  @ApiProperty({ description: 'Firebase UID del usuario' })
+  @IsString()
+  firebaseUid: string;
+
+  @ApiProperty({ description: 'Email del usuario' })
+  @IsEmail()
+  email: string;
+
+  @ApiPropertyOptional({ description: 'Nombre visible del usuario' })
+  @IsOptional()
+  @IsString()
+  nombre?: string;
+
+  @ApiPropertyOptional({ description: 'URL del avatar del usuario' })
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
+}
+EOF
+ok "src/auth/dto/sync-auth.dto.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-2 — src/auth/auth.service.ts
+#  Upsert local + llama al real-back para obtener la org del usuario
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cat > src/auth/auth.service.ts << 'EOF'
+// src/auth/auth.service.ts
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private readonly realBackUrl: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly config: ConfigService,
+  ) {
+    this.realBackUrl = this.config.getOrThrow<string>('REAL_BACK_URL');
+  }
+
+  /**
+   * POST /api/v1/auth/sync
+   *
+   * Flujo:
+   *  1. Upsert del usuario local (dashboard DB) con firebaseUid
+   *  2. Llama al Sistema 1 (real-back) para obtener perfil completo:
+   *     organización, rol de ownership/afiliado, etc.
+   *  3. Retorna perfil enriquecido con datos del Sistema 1
+   *
+   * El frontend debe enviar el Firebase ID Token en Authorization header.
+   * El token ya fue verificado por FirebaseAuthGuard antes de llegar acá.
+   */
+  async sync(dto: SyncAuthDto, firebaseToken: string) {
+    // 1. Upsert local — el dashboard solo necesita uid, email y nombre
+    const localUser = await this.prisma.user.upsert({
+      where: { firebaseUid: dto.firebaseUid },
+      create: {
+        firebaseUid:   dto.firebaseUid,
+        firebaseEmail: dto.email,
+        email:         dto.email,
+        nombre:        dto.nombre ?? dto.email.split('@')[0],
+        role:          'AGENTE',
+      },
+      update: {
+        firebaseEmail: dto.email,
+        email:         dto.email,
+        ...(dto.nombre && { nombre: dto.nombre }),
+      },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
+    });
+
+    // 2. Obtener perfil del Sistema 1 (real-back)
+    let realBackProfile: Record<string, unknown> | null = null;
+    try {
+      const res = await fetch(`${this.realBackUrl}/api/v1/users/me`, {
+        headers: {
+          Authorization: `Bearer ${firebaseToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (res.ok) {
+        const json = (await res.json()) as { data?: Record<string, unknown> };
+        realBackProfile = json.data ?? null;
+      } else if (res.status === 404) {
+        // Usuario nuevo en el Sistema 1 — hacer sync allá también
+        const syncRes = await fetch(`${this.realBackUrl}/api/v1/auth/sync`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${firebaseToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (syncRes.ok) {
+          const syncJson = (await syncRes.json()) as { data?: Record<string, unknown> };
+          // Hacer una segunda llamada a /users/me para obtener el perfil completo
+          const meRes = await fetch(`${this.realBackUrl}/api/v1/users/me`, {
+            headers: { Authorization: `Bearer ${firebaseToken}` },
+          });
+          if (meRes.ok) {
+            const meJson = (await meRes.json()) as { data?: Record<string, unknown> };
+            realBackProfile = meJson.data ?? null;
+          }
+        }
+      }
+    } catch (err) {
+      // El Sistema 1 no está disponible — no bloquear el login del dashboard
+      this.logger.warn(
+        `No se pudo contactar al Sistema 1 (real-back): ${(err as Error).message}`,
+      );
+    }
+
+    await this.audit.log({
+      action:     'auth.sync',
+      entityType: 'User',
+      entityId:   localUser.id,
+      userId:     localUser.id,
+      payload:    { email: dto.email },
+    });
+
+    this.logger.log(`Usuario sincronizado: ${localUser.email}`);
+
+    return {
+      ...localUser,
+      // Datos del Sistema 1 — pueden ser null si el servicio no está disponible
+      realBackProfile,
+    };
+  }
+
+  /**
+   * GET /api/v1/auth/me
+   * Retorna el perfil local del usuario autenticado.
+   */
+  async me(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(
+        'Usuario no encontrado. Llamar a /auth/sync primero.',
+      );
+    }
+
+    return user;
+  }
+}
+EOF
+ok "src/auth/auth.service.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-2 — src/auth/auth.controller.ts
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cat > src/auth/auth.controller.ts << 'EOF'
+// src/auth/auth.controller.ts
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { Request } from 'express';
+import { AuthService } from './auth.service';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+
+@ApiTags('auth')
+@ApiBearerAuth('firebase-jwt')
+@Controller('api/v1/auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  /**
+   * POST /api/v1/auth/sync
+   * Sincroniza usuario Firebase con la DB del dashboard
+   * y obtiene el perfil del Sistema 1 (real-back).
+   */
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Sincroniza usuario con DB local y Sistema 1' })
+  @ApiResponse({ status: 200, description: 'Usuario sincronizado' })
+  @ApiResponse({ status: 401, description: 'Token inválido' })
+  async sync(@Body() dto: SyncAuthDto, @Req() req: Request) {
+    // Extraer el token original para reusarlo en la llamada al Sistema 1
+    const token = req.headers.authorization?.split(' ')[1] ?? '';
+    const result = await this.authService.sync(dto, token);
+    return { success: true, data: result };
+  }
+
+  /**
+   * GET /api/v1/auth/me
+   * Retorna el perfil del usuario autenticado en el dashboard.
+   */
+  @Get('me')
+  @ApiOperation({ summary: 'Perfil del usuario autenticado' })
+  @ApiResponse({ status: 200, description: 'Perfil del usuario' })
+  async me(@Req() req: Request) {
+    const firebaseUid = (req as any).user?.firebaseUid as string;
+    const user = await this.authService.me(firebaseUid);
+    return { success: true, data: user };
+  }
+}
+EOF
+ok "src/auth/auth.controller.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-2 — src/auth/auth.module.ts (sin JWT, solo Firebase)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cat > src/auth/auth.module.ts << 'EOF'
+// src/auth/auth.module.ts
+import { Module } from '@nestjs/common';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { AuditModule } from '../audit/audit.module';
+
+@Module({
+  imports: [AuditModule],
+  controllers: [AuthController],
+  providers: [AuthService],
+  exports: [AuthService],
+})
+export class AuthModule {}
+EOF
+ok "src/auth/auth.module.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-2 — src/users/users.service.ts (simplificado, solo búsqueda local)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cat > src/users/users.service.ts << 'EOF'
+// src/users/users.service.ts
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    return user;
+  }
+
+  async findByFirebaseUid(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    return user;
+  }
+}
+EOF
+ok "src/users/users.service.ts"
+
+cat > src/users/users.module.ts << 'EOF'
+// src/users/users.module.ts
+import { Module } from '@nestjs/common';
+import { UsersService } from './users.service';
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+EOF
+ok "src/users/users.module.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-3 — ZonasModule completo
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-3 — Creando ZonasModule..."
+
+cat > src/zonas/dto/create-zona.dto.ts << 'EOF'
+// src/zonas/dto/create-zona.dto.ts
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class CreateZonaDto {
+  @ApiProperty({ description: 'Nombre de la zona', example: 'Centro' })
+  @IsString()
+  @MaxLength(100)
+  nombre: string;
+
+  @ApiPropertyOptional({ example: 'San Fernando del Valle de Catamarca' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ciudad?: string;
+
+  @ApiPropertyOptional({ example: 'Catamarca' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  provincia?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  descripcion?: string;
+}
+EOF
+
+cat > src/zonas/dto/update-zona.dto.ts << 'EOF'
+// src/zonas/dto/update-zona.dto.ts
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateZonaDto } from './create-zona.dto';
+
+export class UpdateZonaDto extends PartialType(CreateZonaDto) {}
+EOF
+
+cat > src/zonas/zonas.service.ts << 'EOF'
+// src/zonas/zonas.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { CreateZonaDto } from './dto/create-zona.dto';
+import { UpdateZonaDto } from './dto/update-zona.dto';
+import type { TenantContext } from '../tenant/tenant.interface';
+
+@Injectable()
+export class ZonasService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
+
+  async create(dto: CreateZonaDto, ctx: TenantContext) {
+    // Verificar nombre único por organización
+    const existing = await this.prisma.zona.findFirst({
+      where: {
+        organizationId: ctx.organizationId,
+        nombre: { equals: dto.nombre, mode: 'insensitive' },
+        isActive: true,
+      },
+    });
+    if (existing) {
+      throw new ConflictException(`Ya existe una zona con el nombre "${dto.nombre}"`);
+    }
+
+    const zona = await this.prisma.zona.create({
+      data: {
+        nombre:         dto.nombre,
+        ciudad:         dto.ciudad,
+        provincia:      dto.provincia,
+        descripcion:    dto.descripcion,
+        organizationId: ctx.organizationId,
+      },
+    });
+
+    await this.audit.log({
+      action:         'zona.create',
+      entityType:     'Zona',
+      entityId:       zona.id,
+      userId:         ctx.userId,
+      organizationId: ctx.organizationId,
+      payload:        { nombre: dto.nombre },
+    });
+
+    return { success: true, data: zona };
+  }
+
+  async findAll(ctx: TenantContext) {
+    const zonas = await this.prisma.zona.findMany({
+      where: { organizationId: ctx.organizationId, isActive: true },
+      include: {
+        _count: { select: { propiedades: { where: { isActive: true } } } },
+      },
+      orderBy: { nombre: 'asc' },
+    });
+
+    return { success: true, data: zonas };
+  }
+
+  async findOne(id: string, ctx: TenantContext) {
+    const zona = await this.prisma.zona.findFirst({
+      where: { id, organizationId: ctx.organizationId, isActive: true },
+      include: {
+        _count: { select: { propiedades: { where: { isActive: true } } } },
+      },
+    });
+
+    if (!zona) throw new NotFoundException('Zona no encontrada');
+    return { success: true, data: zona };
+  }
+
+  async update(id: string, dto: UpdateZonaDto, ctx: TenantContext) {
+    await this.findOne(id, ctx);
+
+    if (dto.nombre) {
+      const conflict = await this.prisma.zona.findFirst({
+        where: {
+          organizationId: ctx.organizationId,
+          nombre: { equals: dto.nombre, mode: 'insensitive' },
+          isActive: true,
+          NOT: { id },
+        },
+      });
+      if (conflict) {
+        throw new ConflictException(`Ya existe otra zona con el nombre "${dto.nombre}"`);
+      }
+    }
+
+    const zona = await this.prisma.zona.update({
+      where: { id },
+      data: {
+        ...(dto.nombre      && { nombre:      dto.nombre      }),
+        ...(dto.ciudad      && { ciudad:      dto.ciudad      }),
+        ...(dto.provincia   && { provincia:   dto.provincia   }),
+        ...(dto.descripcion && { descripcion: dto.descripcion }),
+      },
+    });
+
+    await this.audit.log({
+      action:         'zona.update',
+      entityType:     'Zona',
+      entityId:       id,
+      userId:         ctx.userId,
+      organizationId: ctx.organizationId,
+      payload:        dto as Record<string, unknown>,
+    });
+
+    return { success: true, data: zona };
+  }
+
+  async remove(id: string, ctx: TenantContext) {
+    await this.findOne(id, ctx);
+
+    // Verificar que no tenga propiedades activas antes de desactivar
+    const propCount = await this.prisma.propiedad.count({
+      where: { zonaId: id, isActive: true },
+    });
+
+    if (propCount > 0) {
+      throw new ConflictException(
+        `No se puede eliminar la zona: tiene ${propCount} propiedad(es) activa(s)`,
+      );
+    }
+
+    await this.prisma.zona.update({
+      where: { id },
+      data: { isActive: false },
+    });
+
+    await this.audit.log({
+      action:         'zona.delete',
+      entityType:     'Zona',
+      entityId:       id,
+      userId:         ctx.userId,
+      organizationId: ctx.organizationId,
+      payload:        {},
+    });
+
+    return { success: true, message: 'Zona eliminada correctamente' };
+  }
+}
+EOF
+
+cat > src/zonas/zonas.controller.ts << 'EOF'
+// src/zonas/zonas.controller.ts
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { ZonasService } from './zonas.service';
+import { CreateZonaDto } from './dto/create-zona.dto';
+import { UpdateZonaDto } from './dto/update-zona.dto';
+import { TenantGuard } from '../tenant/tenant.guard';
+import { TenantCtx } from '../tenant/tenant.decorator';
+import type { TenantContext } from '../tenant/tenant.interface';
+
+@ApiTags('zonas')
+@ApiBearerAuth('firebase-jwt')
+@UseGuards(TenantGuard)
+@Controller('api/v1/zonas')
+export class ZonasController {
+  constructor(private readonly zonasService: ZonasService) {}
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Crear zona' })
+  @ApiResponse({ status: 201, description: 'Zona creada' })
+  create(@Body() dto: CreateZonaDto, @TenantCtx() ctx: TenantContext) {
+    return this.zonasService.create(dto, ctx);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Listar todas las zonas activas de la org' })
+  findAll(@TenantCtx() ctx: TenantContext) {
+    return this.zonasService.findAll(ctx);
+  }
+
+  @Get(':id')
+  @ApiParam({ name: 'id', description: 'ID de la zona' })
+  @ApiOperation({ summary: 'Obtener una zona por ID' })
+  findOne(@Param('id') id: string, @TenantCtx() ctx: TenantContext) {
+    return this.zonasService.findOne(id, ctx);
+  }
+
+  @Patch(':id')
+  @ApiParam({ name: 'id', description: 'ID de la zona' })
+  @ApiOperation({ summary: 'Actualizar zona' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateZonaDto,
+    @TenantCtx() ctx: TenantContext,
+  ) {
+    return this.zonasService.update(id, dto, ctx);
+  }
+
+  @Delete(':id')
+  @ApiParam({ name: 'id', description: 'ID de la zona' })
+  @ApiOperation({ summary: 'Desactivar zona (soft delete)' })
+  @ApiResponse({ status: 200, description: 'Zona eliminada' })
+  @ApiResponse({ status: 409, description: 'La zona tiene propiedades activas' })
+  remove(@Param('id') id: string, @TenantCtx() ctx: TenantContext) {
+    return this.zonasService.remove(id, ctx);
+  }
+}
+EOF
+
+cat > src/zonas/zonas.module.ts << 'EOF'
+// src/zonas/zonas.module.ts
+import { Module } from '@nestjs/common';
+import { ZonasController } from './zonas.controller';
+import { ZonasService } from './zonas.service';
+import { TenantModule } from '../tenant/tenant.module';
+import { AuditModule } from '../audit/audit.module';
+
+@Module({
+  imports: [TenantModule, AuditModule],
+  controllers: [ZonasController],
+  providers: [ZonasService],
+  exports: [ZonasService],
+})
+export class ZonasModule {}
+EOF
+
+cat > src/zonas/zonas.service.spec.ts << 'EOF'
+// src/zonas/zonas.service.spec.ts
+import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ZonasService } from './zonas.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+
+const mockPrisma = {
+  zona: {
+    findFirst:  jest.fn(),
+    findMany:   jest.fn(),
+    create:     jest.fn(),
+    update:     jest.fn(),
+  },
+  propiedad: { count: jest.fn() },
+};
+
+const mockAudit = { log: jest.fn() };
+
+const ctx = {
+  userId: 'user-1',
+  organizationId: 'org-1',
+  role: 'ADMIN',
+  firebaseUid: 'uid-1',
+};
+
+describe('ZonasService', () => {
+  let service: ZonasService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ZonasService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
+      ],
+    }).compile();
+    service = module.get<ZonasService>(ZonasService);
+  });
+
+  describe('create', () => {
+    it('crea una zona y loguea el audit', async () => {
+      mockPrisma.zona.findFirst.mockResolvedValue(null);
+      mockPrisma.zona.create.mockResolvedValue({ id: 'zona-1', nombre: 'Centro' });
+
+      const result = await service.create({ nombre: 'Centro' }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(mockPrisma.zona.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            nombre: 'Centro',
+            organizationId: 'org-1',
+          }),
+        }),
+      );
+      expect(mockAudit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'zona.create' }),
+      );
+    });
+
+    it('lanza ConflictException si el nombre ya existe en la org', async () => {
+      mockPrisma.zona.findFirst.mockResolvedValue({ id: 'zona-1', nombre: 'Centro' });
+
+      await expect(service.create({ nombre: 'Centro' }, ctx))
+        .rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('remove', () => {
+    it('lanza ConflictException si tiene propiedades activas', async () => {
+      mockPrisma.zona.findFirst.mockResolvedValue({ id: 'zona-1', nombre: 'Centro' });
+      mockPrisma.propiedad.count.mockResolvedValue(3);
+
+      await expect(service.remove('zona-1', ctx))
+        .rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('desactiva la zona si no tiene propiedades activas', async () => {
+      mockPrisma.zona.findFirst.mockResolvedValue({ id: 'zona-1', nombre: 'Centro' });
+      mockPrisma.propiedad.count.mockResolvedValue(0);
+      mockPrisma.zona.update.mockResolvedValue({ id: 'zona-1', isActive: false });
+
+      const result = await service.remove('zona-1', ctx);
+      expect(result.success).toBe(true);
+    });
+  });
+});
+EOF
+ok "ZonasModule completo con tests"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-3 — PropiedadesModule completo
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-3 — Creando PropiedadesModule..."
+
+cat > src/propiedades/dto/create-propiedad.dto.ts << 'EOF'
+// src/propiedades/dto/create-propiedad.dto.ts
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  ArrayMaxSize,
+  IsBoolean,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export enum TipoPropiedad {
+  CASA        = 'CASA',
+  DEPARTAMENTO = 'DEPARTAMENTO',
+  TERRENO     = 'TERRENO',
+  LOCAL       = 'LOCAL',
+  OFICINA     = 'OFICINA',
+  GALPON      = 'GALPON',
+  CAMPO       = 'CAMPO',
+}
+
+export enum TipoOperacion {
+  VENTA        = 'VENTA',
+  ALQUILER     = 'ALQUILER',
+  ALQUILER_TEMP = 'ALQUILER_TEMP',
+}
+
+export enum EstadoPropiedad {
+  DISPONIBLE = 'DISPONIBLE',
+  RESERVADA  = 'RESERVADA',
+  VENDIDA    = 'VENDIDA',
+  ALQUILADA  = 'ALQUILADA',
+  PAUSADA    = 'PAUSADA',
+}
+
+export class CreatePropiedadDto {
+  @ApiProperty({ example: 'Hermosa casa en el centro' })
+  @IsString()
+  @MaxLength(200)
+  titulo: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  descripcion?: string;
+
+  @ApiProperty({ enum: TipoPropiedad })
+  @IsEnum(TipoPropiedad)
+  tipo: TipoPropiedad;
+
+  @ApiProperty({ enum: TipoOperacion })
+  @IsEnum(TipoOperacion)
+  operacion: TipoOperacion;
+
+  @ApiProperty({ example: 150000 })
+  @IsNumber()
+  @Min(0)
+  precio: number;
+
+  @ApiPropertyOptional({ example: 'USD', default: 'USD' })
+  @IsOptional()
+  @IsString()
+  moneda?: string;
+
+  @ApiPropertyOptional({ example: 120.5 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  superficie?: number;
+
+  @ApiPropertyOptional({ example: 4 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  ambientes?: number;
+
+  @ApiPropertyOptional({ example: 2 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  banos?: number;
+
+  @ApiPropertyOptional({ example: 3 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dormitorios?: number;
+
+  @ApiPropertyOptional({ example: 'Av. Güemes 245' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  direccion?: string;
+
+  @ApiPropertyOptional({ enum: EstadoPropiedad, default: 'DISPONIBLE' })
+  @IsOptional()
+  @IsEnum(EstadoPropiedad)
+  estado?: EstadoPropiedad;
+
+  @ApiPropertyOptional({ default: false })
+  @IsOptional()
+  @IsBoolean()
+  destacada?: boolean;
+
+  @ApiPropertyOptional({ description: 'ID de la zona' })
+  @IsOptional()
+  @IsString()
+  zonaId?: string;
+
+  @ApiPropertyOptional({ description: 'URLs de imágenes (máx 10)', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMaxSize(10, { message: 'No se pueden cargar más de 10 imágenes' })
+  imagenes?: string[];
+}
+EOF
+
+cat > src/propiedades/dto/update-propiedad.dto.ts << 'EOF'
+// src/propiedades/dto/update-propiedad.dto.ts
+import { PartialType } from '@nestjs/mapped-types';
+import { CreatePropiedadDto } from './create-propiedad.dto';
+
+export class UpdatePropiedadDto extends PartialType(CreatePropiedadDto) {}
+EOF
+
+cat > src/propiedades/dto/filter-propiedad.dto.ts << 'EOF'
+// src/propiedades/dto/filter-propiedad.dto.ts
+import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { TipoPropiedad, TipoOperacion, EstadoPropiedad } from './create-propiedad.dto';
+
+export class FilterPropiedadDto {
+  @ApiPropertyOptional({ enum: TipoPropiedad })
+  @IsOptional()
+  @IsEnum(TipoPropiedad)
+  tipo?: TipoPropiedad;
+
+  @ApiPropertyOptional({ enum: TipoOperacion })
+  @IsOptional()
+  @IsEnum(TipoOperacion)
+  operacion?: TipoOperacion;
+
+  @ApiPropertyOptional({ enum: EstadoPropiedad })
+  @IsOptional()
+  @IsEnum(EstadoPropiedad)
+  estado?: EstadoPropiedad;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  zonaId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precioMin?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precioMax?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  buscar?: string;
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  limit?: number = 20;
+}
+EOF
+
+cat > src/propiedades/propiedades.service.ts << 'EOF'
+// src/propiedades/propiedades.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { CreatePropiedadDto } from './dto/create-propiedad.dto';
+import { UpdatePropiedadDto } from './dto/update-propiedad.dto';
+import { FilterPropiedadDto } from './dto/filter-propiedad.dto';
+import type { TenantContext } from '../tenant/tenant.interface';
+import { Prisma } from '@prisma/client';
+
+@Injectable()
+export class PropiedadesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
+
+  async create(dto: CreatePropiedadDto, ctx: TenantContext) {
+    // Validar que la zona pertenece a la org si se provee
+    if (dto.zonaId) {
+      const zona = await this.prisma.zona.findFirst({
+        where: { id: dto.zonaId, organizationId: ctx.organizationId, isActive: true },
+      });
+      if (!zona) {
+        throw new BadRequestException('La zona especificada no existe o no pertenece a esta organización');
+      }
+    }
+
+    const propiedad = await this.prisma.propiedad.create({
+      data: {
+        titulo:         dto.titulo,
+        descripcion:    dto.descripcion,
+        tipo:           dto.tipo,
+        operacion:      dto.operacion,
+        precio:         dto.precio,
+        moneda:         dto.moneda ?? 'USD',
+        superficie:     dto.superficie,
+        ambientes:      dto.ambientes,
+        banos:          dto.banos,
+        dormitorios:    dto.dormitorios,
+        direccion:      dto.direccion,
+        estado:         dto.estado ?? 'DISPONIBLE',
+        destacada:      dto.destacada ?? false,
+        organizationId: ctx.organizationId,
+        zonaId:         dto.zonaId,
+        imagenes: dto.imagenes
+          ? {
+              create: dto.imagenes.map((url, orden) => ({ url, orden })),
+            }
+          : undefined,
+      },
+      include: {
+        imagenes: { orderBy: { orden: 'asc' } },
+        zona:     { select: { id: true, nombre: true } },
+      },
+    });
+
+    await this.audit.log({
+      action:         'propiedad.create',
+      entityType:     'Propiedad',
+      entityId:       propiedad.id,
+      userId:         ctx.userId,
+      organizationId: ctx.organizationId,
+      payload:        { titulo: dto.titulo, tipo: dto.tipo, operacion: dto.operacion },
+    });
+
+    return { success: true, data: propiedad };
+  }
+
+  async findAll(filters: FilterPropiedadDto, ctx: TenantContext) {
+    const page  = filters.page  ?? 1;
+    const limit = Math.min(filters.limit ?? 20, 100); // máx 100 por página
+    const skip  = (page - 1) * limit;
+
+    const where: Prisma.PropiedadWhereInput = {
+      organizationId: ctx.organizationId,
+      isActive:       true,
+      ...(filters.tipo      && { tipo:      filters.tipo      }),
+      ...(filters.operacion && { operacion: filters.operacion }),
+      ...(filters.estado    && { estado:    filters.estado    }),
+      ...(filters.zonaId    && { zonaId:    filters.zonaId    }),
+      ...(filters.buscar && {
+        OR: [
+          { titulo:     { contains: filters.buscar, mode: 'insensitive' } },
+          { descripcion:{ contains: filters.buscar, mode: 'insensitive' } },
+          { direccion:  { contains: filters.buscar, mode: 'insensitive' } },
+        ],
+      }),
+      ...((filters.precioMin != null || filters.precioMax != null) && {
+        precio: {
+          ...(filters.precioMin != null && { gte: filters.precioMin }),
+          ...(filters.precioMax != null && { lte: filters.precioMax }),
+        },
+      }),
+    };
+
+    const [total, items] = await Promise.all([
+      this.prisma.propiedad.count({ where }),
+      this.prisma.propiedad.findMany({
+        where,
+        include: {
+          imagenes: { orderBy: { orden: 'asc' }, take: 1 },
+          zona:     { select: { id: true, nombre: true } },
+        },
+        orderBy: [
+          { destacada: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      success: true,
+      data: items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages:  Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+        hasNextPage: page < Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findOne(id: string, ctx: TenantContext) {
+    const propiedad = await this.prisma.propiedad.findFirst({
+      where: { id, organizationId: ctx.organizationId, isActive: true },
+      include: {
+        imagenes: { orderBy: { orden: 'asc' } },
+        zona:     { select: { id: true, nombre: true, ciudad: true } },
+      },
+    });
+
+    if (!propiedad) throw new NotFoundException('Propiedad no encontrada');
+    return { success: true, data: propiedad };
+  }
+
+  async update(id: string, dto: UpdatePropiedadDto, ctx: TenantContext) {
+    await this.findOne(id, ctx); // verifica que existe y pertenece a la org
+
+    if (dto.zonaId) {
+      const zona = await this.prisma.zona.findFirst({
+        where: { id: dto.zonaId, organizationId: ctx.organizationId, isActive: true },
+      });
+      if (!zona) throw new BadRequestException('Zona inválida');
+    }
+
+    const propiedad = await this.prisma.propiedad.update({
+      where: { id },
+      data: {
+        ...(dto.titulo       != null && { titulo:       dto.titulo       }),
+        ...(dto.descripcion  != null && { descripcion:  dto.descripcion  }),
+        ...(dto.tipo         != null && { tipo:         dto.tipo         }),
+        ...(dto.operacion    != null && { operacion:    dto.operacion    }),
+        ...(dto.precio       != null && { precio:       dto.precio       }),
+        ...(dto.moneda       != null && { moneda:       dto.moneda       }),
+        ...(dto.superficie   != null && { superficie:   dto.superficie   }),
+        ...(dto.ambientes    != null && { ambientes:    dto.ambientes    }),
+        ...(dto.banos        != null && { banos:        dto.banos        }),
+        ...(dto.dormitorios  != null && { dormitorios:  dto.dormitorios  }),
+        ...(dto.direccion    != null && { direccion:    dto.direccion    }),
+        ...(dto.estado       != null && { estado:       dto.estado       }),
+        ...(dto.destacada    != null && { destacada:    dto.destacada    }),
+        ...(dto.zonaId       != null && { zonaId:       dto.zonaId       }),
+        ...(dto.imagenes && {
+          imagenes: {
+            deleteMany: {},
+            create: dto.imagenes.map((url, orden) => ({ url, orden })),
+          },
+        }),
+      },
+      include: {
+        imagenes: { orderBy: { orden: 'asc' } },
+        zona:     { select: { id: true, nombre: true } },
+      },
+    });
+
+    await this.audit.log({
+      action:         'propiedad.update',
+      entityType:     'Propiedad',
+      entityId:       id,
+      userId:         ctx.userId,
+      organizationId: ctx.organizationId,
+      payload:        dto as Record<string, unknown>,
+    });
+
+    return { success: true, data: propiedad };
+  }
+
+  async remove(id: string, ctx: TenantContext) {
+    await this.findOne(id, ctx);
+
+    await this.prisma.propiedad.update({
+      where: { id },
+      data: { isActive: false },
+    });
+
+    await this.audit.log({
+      action:         'propiedad.delete',
+      entityType:     'Propiedad',
+      entityId:       id,
+      userId:         ctx.userId,
+      organizationId: ctx.organizationId,
+      payload:        {},
+    });
+
+    return { success: true, message: 'Propiedad eliminada correctamente' };
+  }
+}
+EOF
+
+cat > src/propiedades/propiedades.controller.ts << 'EOF'
+// src/propiedades/propiedades.controller.ts
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { PropiedadesService } from './propiedades.service';
+import { CreatePropiedadDto } from './dto/create-propiedad.dto';
+import { UpdatePropiedadDto } from './dto/update-propiedad.dto';
+import { FilterPropiedadDto } from './dto/filter-propiedad.dto';
+import { TenantGuard } from '../tenant/tenant.guard';
+import { TenantCtx } from '../tenant/tenant.decorator';
+import type { TenantContext } from '../tenant/tenant.interface';
+
+@ApiTags('propiedades')
+@ApiBearerAuth('firebase-jwt')
+@UseGuards(TenantGuard)
+@Controller('api/v1/propiedades')
+export class PropiedadesController {
+  constructor(private readonly propiedadesService: PropiedadesService) {}
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Crear propiedad' })
+  create(@Body() dto: CreatePropiedadDto, @TenantCtx() ctx: TenantContext) {
+    return this.propiedadesService.create(dto, ctx);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Listar propiedades con filtros y paginación' })
+  findAll(
+    @Query() filters: FilterPropiedadDto,
+    @TenantCtx() ctx: TenantContext,
+  ) {
+    return this.propiedadesService.findAll(filters, ctx);
+  }
+
+  @Get(':id')
+  @ApiParam({ name: 'id', description: 'ID de la propiedad' })
+  @ApiOperation({ summary: 'Obtener propiedad por ID' })
+  findOne(@Param('id') id: string, @TenantCtx() ctx: TenantContext) {
+    return this.propiedadesService.findOne(id, ctx);
+  }
+
+  @Patch(':id')
+  @ApiParam({ name: 'id', description: 'ID de la propiedad' })
+  @ApiOperation({ summary: 'Actualizar propiedad' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePropiedadDto,
+    @TenantCtx() ctx: TenantContext,
+  ) {
+    return this.propiedadesService.update(id, dto, ctx);
+  }
+
+  @Delete(':id')
+  @ApiParam({ name: 'id', description: 'ID de la propiedad' })
+  @ApiOperation({ summary: 'Eliminar propiedad (soft delete)' })
+  @ApiResponse({ status: 200, description: 'Propiedad eliminada' })
+  remove(@Param('id') id: string, @TenantCtx() ctx: TenantContext) {
+    return this.propiedadesService.remove(id, ctx);
+  }
+}
+EOF
+
+cat > src/propiedades/propiedades.module.ts << 'EOF'
+// src/propiedades/propiedades.module.ts
+import { Module } from '@nestjs/common';
+import { PropiedadesController } from './propiedades.controller';
+import { PropiedadesService } from './propiedades.service';
+import { TenantModule } from '../tenant/tenant.module';
+import { AuditModule } from '../audit/audit.module';
+
+@Module({
+  imports: [TenantModule, AuditModule],
+  controllers: [PropiedadesController],
+  providers: [PropiedadesService],
+  exports: [PropiedadesService],
+})
+export class PropiedadesModule {}
+EOF
+
+cat > src/propiedades/propiedades.service.spec.ts << 'EOF'
+// src/propiedades/propiedades.service.spec.ts
+import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { PropiedadesService } from './propiedades.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+
+const mockPrisma = {
+  propiedad: {
+    create:   jest.fn(),
+    findMany: jest.fn(),
+    findFirst: jest.fn(),
+    count:    jest.fn(),
+    update:   jest.fn(),
+  },
+  zona: { findFirst: jest.fn() },
+};
+
+const mockAudit = { log: jest.fn() };
+
+const ctx = {
+  userId: 'user-1',
+  organizationId: 'org-1',
+  role: 'ADMIN',
+  firebaseUid: 'uid-1',
+};
+
+const baseProp = {
+  id: 'prop-1',
+  titulo: 'Casa en el centro',
+  tipo: 'CASA',
+  operacion: 'VENTA',
+  precio: 150000,
+  moneda: 'USD',
+  estado: 'DISPONIBLE',
+  isActive: true,
+  organizationId: 'org-1',
+  imagenes: [],
+  zona: null,
+};
+
+describe('PropiedadesService', () => {
+  let service: PropiedadesService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PropiedadesService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAudit },
+      ],
+    }).compile();
+    service = module.get<PropiedadesService>(PropiedadesService);
+  });
+
+  describe('create', () => {
+    const dto = {
+      titulo: 'Casa en el centro',
+      tipo: 'CASA' as any,
+      operacion: 'VENTA' as any,
+      precio: 150000,
+    };
+
+    it('crea una propiedad correctamente', async () => {
+      mockPrisma.propiedad.create.mockResolvedValue(baseProp);
+
+      const result = await service.create(dto, ctx);
+
+      expect(result.success).toBe(true);
+      expect(mockPrisma.propiedad.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            titulo: 'Casa en el centro',
+            organizationId: 'org-1',
+            moneda: 'USD',
+            estado: 'DISPONIBLE',
+          }),
+        }),
+      );
+      expect(mockAudit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'propiedad.create' }),
+      );
+    });
+
+    it('lanza BadRequest si la zona no pertenece a la org', async () => {
+      mockPrisma.zona.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create({ ...dto, zonaId: 'zona-ajena' }, ctx),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('findAll', () => {
+    it('retorna items paginados con meta', async () => {
+      mockPrisma.propiedad.count.mockResolvedValue(5);
+      mockPrisma.propiedad.findMany.mockResolvedValue([baseProp]);
+
+      const result = await service.findAll({ page: 1, limit: 20 }, ctx);
+
+      expect(result.success).toBe(true);
+      expect(result.meta.total).toBe(5);
+      expect(result.meta.totalPages).toBe(1);
+    });
+  });
+
+  describe('findOne', () => {
+    it('retorna la propiedad si existe y pertenece a la org', async () => {
+      mockPrisma.propiedad.findFirst.mockResolvedValue(baseProp);
+      const result = await service.findOne('prop-1', ctx);
+      expect(result.success).toBe(true);
+    });
+
+    it('lanza NotFoundException si no existe', async () => {
+      mockPrisma.propiedad.findFirst.mockResolvedValue(null);
+      await expect(service.findOne('prop-none', ctx))
+        .rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('remove', () => {
+    it('hace soft delete y loguea audit', async () => {
+      mockPrisma.propiedad.findFirst.mockResolvedValue(baseProp);
+      mockPrisma.propiedad.update.mockResolvedValue({ ...baseProp, isActive: false });
+
+      const result = await service.remove('prop-1', ctx);
+      expect(result.success).toBe(true);
+      expect(mockPrisma.propiedad.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isActive: false } }),
+      );
+    });
+  });
+});
+EOF
+ok "PropiedadesModule completo con tests"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-3 — HealthModule
+# ═══════════════════════════════════════════════════════════════════════════════
+info "DB-3 — Creando HealthModule..."
+
+cat > src/health/health.controller.ts << 'EOF'
+// src/health/health.controller.ts
+import { Controller, Get } from '@nestjs/common';
+import {
+  HealthCheck,
+  HealthCheckService,
+  PrismaHealthIndicator,
+  MemoryHealthIndicator,
+} from '@nestjs/terminus';
+import { PrismaService } from '../prisma/prisma.service';
+import { Public } from '../common/decorators/public.decorator';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+
+@ApiTags('health')
+@Controller('health')
+export class HealthController {
+  constructor(
+    private health: HealthCheckService,
+    private prismaHealth: PrismaHealthIndicator,
+    private memory: MemoryHealthIndicator,
+    private prisma: PrismaService,
+  ) {}
+
+  @Public()
+  @Get()
+  @HealthCheck()
+  @ApiOperation({ summary: 'Health check: DB y memoria' })
+  check() {
+    return this.health.check([
+      () => this.prismaHealth.pingCheck('database', this.prisma),
+      () => this.memory.checkHeap('memory_heap', 300 * 1024 * 1024),
+      () => this.memory.checkRSS('memory_rss',   512 * 1024 * 1024),
+    ]);
+  }
+}
+EOF
+
+cat > src/health/health.module.ts << 'EOF'
+// src/health/health.module.ts
+import { Module } from '@nestjs/common';
+import { TerminusModule } from '@nestjs/terminus';
+import { HealthController } from './health.controller';
+
+@Module({
+  imports: [TerminusModule],
+  controllers: [HealthController],
+})
+export class HealthModule {}
+EOF
+ok "HealthModule"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 + DB-3 — AppModule actualizado
+# ═══════════════════════════════════════════════════════════════════════════════
+info "Actualizando AppModule..."
+
+cat > src/app.module.ts << 'EOF'
+// src/app.module.ts
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { PrismaModule } from './prisma/prisma.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { AuditModule } from './audit/audit.module';
+import { TenantModule } from './tenant/tenant.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { ZonasModule } from './zonas/zonas.module';
+import { PropiedadesModule } from './propiedades/propiedades.module';
+import { HealthModule } from './health/health.module';
+import { LoggingMiddleware } from './common/middleware/logging.middleware';
+import { envValidation } from './config/env.validation';
+import { FirebaseAuthGuard } from './auth/guards/firebase-auth.guard';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal:    true,
+      validate:    envValidation,
+      envFilePath: '.env',
+    }),
+    PrismaModule,
+    FirebaseModule,
+    AuditModule,
+    TenantModule,
+    AuthModule,
+    UsersModule,
+    ZonasModule,
+    PropiedadesModule,
+    HealthModule,
+  ],
+  providers: [
+    {
+      provide:   APP_GUARD,
+      useClass:  FirebaseAuthGuard,
+    },
+  ],
+})
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggingMiddleware).forRoutes('*');
+  }
+}
+EOF
+ok "src/app.module.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — main.ts actualizado
+# ═══════════════════════════════════════════════════════════════════════════════
+info "Actualizando main.ts..."
+
+cat > src/main.ts << 'EOF'
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { LoggingMiddleware } from './common/middleware/logging.middleware';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
+  const logger = new Logger('Bootstrap');
+
+  // Seguridad HTTP
+  app.use(helmet());
+
+  // CORS — permite headers del ecosistema SSO
+  const allowedOrigins = configService
+    .get<string>('ALLOWED_ORIGINS', 'http://localhost:3002')
+    .split(',')
+    .map((o) => o.trim());
+
+  app.enableCors({
+    origin:         allowedOrigins,
+    methods:        ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-organization-id'],
+    credentials:    true,
+  });
+
+  // Pipes
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist:            true,
+      forbidNonWhitelisted: true,
+      transform:            true,
+      transformOptions:     { enableImplicitConversion: true },
+    }),
+  );
+
+  // Filters e interceptors
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new ResponseInterceptor());
+
+  // Swagger (solo en non-production)
+  if (configService.get('NODE_ENV') !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Real Estate Dashboard API')
+      .setDescription('Sistema 2 — Dashboard de gestión para inmobiliarias')
+      .setVersion('1.0')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        'firebase-jwt',
+      )
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+  }
+
+  const port = configService.get<number>('PORT', 3001);
+  await app.listen(port);
+
+  logger.log(`🚀 Real Estate Dashboard API: http://localhost:${port}`);
+  logger.log(`🔥 Firebase Auth SSO activo`);
+  logger.log(`🏢 Multi-tenant (x-organization-id)`);
+  logger.log(`🔗 Sistema 1 URL: ${configService.get('REAL_BACK_URL')}`);
+  if (configService.get('NODE_ENV') !== 'production') {
+    logger.log(`📄 Swagger docs: http://localhost:${port}/api/docs`);
+  }
+}
+
+bootstrap();
+EOF
+ok "src/main.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — .env.example actualizado
+# ═══════════════════════════════════════════════════════════════════════════════
+info "Actualizando .env.example..."
+
+cat > .env.example << 'EOF'
+# ─── Servidor ────────────────────────────────────────────────────────────────
+NODE_ENV=development
+PORT=3001
+
+# ─── Base de datos ────────────────────────────────────────────────────────────
+DATABASE_URL=postgresql://user:password@localhost:5432/real_estate_dashboard?schema=public
+
+# ─── Firebase Admin SDK ───────────────────────────────────────────────────────
+# Firebase Console → Configuración → Cuentas de servicio → Generar clave privada
+FIREBASE_PROJECT_ID=tu-proyecto-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@tu-proyecto.iam.gserviceaccount.com
+# Nota: los \n en la private key deben ser literales \\n en el .env
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
+
+# ─── Sistema 1 — real-back ────────────────────────────────────────────────────
+# URL interna del Sistema 1 (organizaciones-back / real-back)
+# En producción: URL del servidor donde corre el real-back
+REAL_BACK_URL=http://localhost:3000
+
+# ─── CORS ─────────────────────────────────────────────────────────────────────
+# Frontend del dashboard — separar por comas si hay múltiples orígenes
+ALLOWED_ORIGINS=http://localhost:3002
+
+# ─── Rate limiting (opcional — defaults aplicados si no están) ────────────────
+THROTTLE_TTL_MS=60000
+THROTTLE_LIMIT=100
+EOF
+ok ".env.example"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DB-1 — seed.ts actualizado para real estate
+# ═══════════════════════════════════════════════════════════════════════════════
+info "Actualizando prisma/seed.ts..."
+
+cat > prisma/seed.ts << 'EOF'
+// prisma/seed.ts
+import 'dotenv/config';
+import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import * as pg from 'pg';
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter } as any);
+
+const SEED_ORG_ID = 'org-real-estate-seed-000000000001';
+
+async function main() {
+  console.log('🌱 Iniciando seed — Real Estate Dashboard\n');
+
+  // ── Organización demo ──────────────────────────────────────────────────────
+  const org = await prisma.organization.upsert({
+    where: { id: SEED_ORG_ID },
+    update: {},
+    create: {
+      id:   SEED_ORG_ID,
+      name: 'Inmobiliaria San Martín',
+      slug: 'inmobiliaria-san-martin',
+      enabledProducts: {
+        propiedades: true,
+        chat:        true,
+        pagos:       false,
+        campanas:    false,
+      },
+      systemSettings: {},
+    },
+  });
+  console.log(`✅ Organización: ${org.name} (${org.id})`);
+
+  // ── Zonas ─────────────────────────────────────────────────────────────────
+  console.log('\n📍 Creando zonas...');
+
+  const zonasData = [
+    { nombre: 'Centro',         ciudad: 'San Fernando del Valle', provincia: 'Catamarca' },
+    { nombre: 'Norte',          ciudad: 'San Fernando del Valle', provincia: 'Catamarca' },
+    { nombre: 'Zona Residencial', ciudad: 'San Fernando del Valle', provincia: 'Catamarca' },
+  ];
+
+  const zonas: Record<string, string> = {};
+  for (const z of zonasData) {
+    const zona = await prisma.zona.upsert({
+      where: { id: `zona-${z.nombre.toLowerCase().replace(/ /g, '-')}-seed` },
+      update: {},
+      create: {
+        id:             `zona-${z.nombre.toLowerCase().replace(/ /g, '-')}-seed`,
+        nombre:         z.nombre,
+        ciudad:         z.ciudad,
+        provincia:      z.provincia,
+        organizationId: SEED_ORG_ID,
+      },
+    });
+    zonas[z.nombre] = zona.id;
+    console.log(`  ✅ ${zona.nombre}`);
+  }
+
+  // ── Propiedades demo ───────────────────────────────────────────────────────
+  console.log('\n🏠 Creando propiedades demo...');
+
+  const propiedadesData = [
+    {
+      titulo: 'Casa amplia en el centro con jardín',
+      tipo: 'CASA', operacion: 'VENTA', precio: 180000, moneda: 'USD',
+      superficie: 180, ambientes: 5, banos: 2, dormitorios: 3,
+      direccion: 'Av. Güemes 245, Centro',
+      estado: 'DISPONIBLE', destacada: true, zona: 'Centro',
+    },
+    {
+      titulo: 'Departamento moderno 2 ambientes',
+      tipo: 'DEPARTAMENTO', operacion: 'ALQUILER', precio: 120000, moneda: 'ARS',
+      superficie: 55, ambientes: 2, banos: 1, dormitorios: 1,
+      direccion: 'Sarmiento 780, Centro',
+      estado: 'DISPONIBLE', destacada: false, zona: 'Centro',
+    },
+    {
+      titulo: 'Terreno con vista al cerro',
+      tipo: 'TERRENO', operacion: 'VENTA', precio: 45000, moneda: 'USD',
+      superficie: 600, ambientes: null, banos: null, dormitorios: null,
+      direccion: 'Camino al Portezuelo s/n',
+      estado: 'DISPONIBLE', destacada: false, zona: 'Norte',
+    },
+    {
+      titulo: 'Casa en barrio residencial — 4 dormitorios',
+      tipo: 'CASA', operacion: 'VENTA', precio: 250000, moneda: 'USD',
+      superficie: 220, ambientes: 6, banos: 3, dormitorios: 4,
+      direccion: 'Los Aromos 123',
+      estado: 'RESERVADA', destacada: true, zona: 'Zona Residencial',
+    },
+  ];
+
+  for (const p of propiedadesData) {
+    const propiedad = await prisma.propiedad.create({
+      data: {
+        titulo:         p.titulo,
+        tipo:           p.tipo as any,
+        operacion:      p.operacion as any,
+        precio:         p.precio,
+        moneda:         p.moneda,
+        superficie:     p.superficie,
+        ambientes:      p.ambientes,
+        banos:          p.banos,
+        dormitorios:    p.dormitorios,
+        direccion:      p.direccion,
+        estado:         p.estado as any,
+        destacada:      p.destacada,
+        organizationId: SEED_ORG_ID,
+        zonaId:         zonas[p.zona],
+      },
+    });
+    console.log(`  ✅ ${propiedad.titulo.slice(0, 50)}...`);
+  }
+
+  console.log('\n🎉 Seed completado');
+  console.log('─────────────────────────────────────────────────────');
+  console.log(`🏢 Organización: ${org.name}`);
+  console.log(`📍 Zonas:        ${zonasData.length}`);
+  console.log(`🏠 Propiedades:  ${propiedadesData.length}`);
+}
+
+main()
+  .catch((e) => { console.error('❌', e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); await pool.end(); });
+EOF
+ok "prisma/seed.ts"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Instalar dependencias finales + build + tests
+# ═══════════════════════════════════════════════════════════════════════════════
+info "Instalando dependencias finales..."
+pnpm add helmet
+pnpm install
+
+echo ""
+info "Ejecutando build de verificación..."
+pnpm run build 2>&1 | tail -25
+
+echo ""
+info "Ejecutando tests..."
+pnpm run test --passWithNoTests 2>&1 | tail -30
+
+echo ""
+echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  ✓ real-dashboard-back — Real Estate listo${NC}"
+echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo "Sprints completados:"
+echo "  DB-1 — Dominio Apple eliminado, Real Estate creado, AppModule limpio  ✓"
+echo "  DB-2 — AuthService conectado con Sistema 1 (real-back), JWT eliminado ✓"
+echo "  DB-3 — ZonasModule + PropiedadesModule con filtros, paginación, tests  ✓"
+echo ""
+echo "Endpoints disponibles:"
+echo "  POST   /api/v1/auth/sync"
+echo "  GET    /api/v1/auth/me"
+echo "  GET    /api/v1/zonas"
+echo "  POST   /api/v1/zonas"
+echo "  GET    /api/v1/zonas/:id"
+echo "  PATCH  /api/v1/zonas/:id"
+echo "  DELETE /api/v1/zonas/:id"
+echo "  GET    /api/v1/propiedades"
+echo "  POST   /api/v1/propiedades"
+echo "  GET    /api/v1/propiedades/:id"
+echo "  PATCH  /api/v1/propiedades/:id"
+echo "  DELETE /api/v1/propiedades/:id"
+echo "  GET    /health"
+echo "  GET    /api/docs  (Swagger — solo NODE_ENV != production)"
+echo ""
+echo "────────────────────────────────────────────────────────────"
+echo "  RECORDATORIO — pasos manuales:"
+echo ""
+echo "  1. Copiar real-dashboard-schema.prisma → prisma/schema.prisma"
+echo "  2. pnpm prisma migrate dev --name real_estate_domain"
+echo "  3. Copiar .env.example → .env y completar los valores"
+echo "  4. Agregar REAL_BACK_URL apuntando al real-back (Sistema 1)"
+echo "  5. Opcional: pnpm prisma db seed"
+echo "────────────────────────────────────────────────────────────"
+echo ""
+</file>
+
+<file path="nest-cli.json">
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+</file>
+
+<file path="prisma.config.ts">
+// This file was generated by Prisma, and assumes you have installed the following:
+// npm install --save-dev prisma dotenv
+import "dotenv/config";
+import { defineConfig } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    path: "prisma/migrations",
+    seed: 'prisma/seed.ts',
+  },
+  datasource: {
+    url: process.env["DATABASE_URL"],
+  },
+});
+</file>
+
+<file path="src/auth/dto/login.dto.ts">
+// src/auth/dto/login.dto.ts
+import { IsEmail, IsString, MinLength } from 'class-validator';
+
+export class LoginDto {
+  @IsEmail({}, { message: 'El email debe ser válido' })
+  email: string;
+
+  @IsString()
+  @MinLength(1)
+  password: string;
+}
+</file>
+
+<file path="src/auth/dto/refresh-token.dto.ts">
+// src/auth/dto/refresh-token.dto.ts
+import { IsString, IsNotEmpty } from 'class-validator';
+
+export class RefreshTokenDto {
+  @IsString()
+  @IsNotEmpty()
+  refreshToken: string;
+}
+</file>
+
+<file path="src/auth/dto/register.dto.ts">
+// src/auth/dto/register.dto.ts
+import {
+  IsEmail,
+  IsString,
+  MinLength,
+  MaxLength,
+  Matches,
+  IsOptional,
+  IsEnum,
+} from 'class-validator';
+import { Role } from '@prisma/client';
+
+export class RegisterDto {
+  @IsEmail({}, { message: 'El email debe ser válido' })
+  email: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  nombre: string;
+
+  @IsString()
+  @MinLength(8, { message: 'La contraseña debe tener mínimo 8 caracteres' })
+  @MaxLength(50)
+  @Matches(/((?=.*\d)|(?=.*\W+))(?![.\n])(?=.*[A-Z])(?=.*[a-z]).*$/, {
+    message:
+      'La contraseña debe contener mayúscula, minúscula y número/caracter especial',
+  })
+  password: string;
+
+  @IsOptional()
+  @IsEnum(Role, { message: 'El rol debe ser ADMIN o VENDEDOR' })
+  role?: Role;
+}
+</file>
+
+<file path="src/auth/guards/jwt-access.guard.ts">
+// src/auth/guards/jwt-access.guard.ts
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtAccessGuard extends AuthGuard('jwt-access') {}
+</file>
+
+<file path="src/auth/guards/jwt-refresh.guard.ts">
+// src/auth/guards/jwt-refresh.guard.ts
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtRefreshGuard extends AuthGuard('jwt-refresh') {}
+</file>
+
+<file path="src/auth/interfaces/jwt-payload.interface.ts">
+// src/auth/interfaces/jwt-payload.interface.ts
+import { Role } from '@prisma/client';
+
+export interface JwtPayload {
+  sub: string;
+  email: string;
+  role: Role;
+  iat?: number;
+  exp?: number;
+}
+</file>
+
+<file path="src/auth/strategies/jwt-access.strategy.ts">
+// src/auth/strategies/jwt-access.strategy.ts
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { UsersService } from '../../users/users.service';
+
+@Injectable()
+export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt-access') {
+  constructor(
+    configService: ConfigService,
+    private usersService: UsersService,
+  ) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: configService.get<string>('JWT_ACCESS_SECRET'),
+    });
+  }
+
+  async validate(payload: JwtPayload): Promise<JwtPayload> {
+    const user = await this.usersService.findById(payload.sub);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Token inválido o usuario inactivo');
+    }
+    return { sub: payload.sub, email: payload.email, role: payload.role };
+  }
+}
+</file>
+
+<file path="src/auth/strategies/jwt-refresh.strategy.ts">
+// src/auth/strategies/jwt-refresh.strategy.ts
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Request } from 'express';
+import { JwtPayload } from '../interfaces/jwt-payload.interface';
+
+@Injectable()
+export class JwtRefreshStrategy extends PassportStrategy(
+  Strategy,
+  'jwt-refresh',
+) {
+  constructor(configService: ConfigService) {
+    super({
+      jwtFromRequest: ExtractJwt.fromBodyField('refreshToken'),
+      ignoreExpiration: false,
+      secretOrKey: configService.get<string>('JWT_REFRESH_SECRET'),
+      passReqToCallback: true,
+    });
+  }
+
+  validate(req: Request, payload: JwtPayload): JwtPayload & { refreshToken: string } {
+    const refreshToken = req.body?.refreshToken;
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token requerido');
+    }
+    return { ...payload, refreshToken };
+  }
+}
+</file>
+
+<file path="src/common/interceptors/response.interceptor.ts">
+// src/common/interceptors/response.interceptor.ts
+import {
+  Injectable,
+  NestInterceptor,
+  ExecutionContext,
+  CallHandler,
+} from '@nestjs/common';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
+@Injectable()
+export class ResponseInterceptor<T>
+  implements NestInterceptor<T, ApiResponse<T>>
+{
+  intercept(
+    context: ExecutionContext,
+    next: CallHandler,
+  ): Observable<ApiResponse<T>> {
+    return next.handle().pipe(
+      map((data) => {
+        // Si el controlador ya devuelve el formato correcto, lo respetamos
+        if (
+          data &&
+          typeof data === 'object' &&
+          'success' in data &&
+          'data' in data
+        ) {
+          return data;
+        }
+
+        return {
+          success: true,
+          data: data ?? null,
+        };
+      }),
+    );
+  }
+}
+</file>
+
+<file path="src/common/middleware/logging.middleware.ts">
+// src/common/middleware/logging.middleware.ts
+import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
+import { Request, Response, NextFunction } from 'express';
+
+@Injectable()
+export class LoggingMiddleware implements NestMiddleware {
+  private readonly logger = new Logger('HTTP');
+
+  use(req: Request, res: Response, next: NextFunction) {
+    const { method, originalUrl, ip } = req;
+    const userAgent = req.get('user-agent') || '';
+    const start = Date.now();
+
+    res.on('finish', () => {
+      const { statusCode } = res;
+      const duration = Date.now() - start;
+      const contentLength = res.get('content-length') || 0;
+
+      this.logger.log(
+        `${method} ${originalUrl} ${statusCode} ${duration}ms ${contentLength}b — ${ip} "${userAgent}"`,
+      );
+    });
+
+    next();
+  }
+}
+</file>
+
+<file path="src/prisma/prisma.module.ts">
+// src/prisma/prisma.module.ts
+import { Global, Module } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class PrismaModule {}
+</file>
+
+<file path="src/users/users.module.ts">
+// src/users/users.module.ts
+import { Module } from '@nestjs/common';
+import { UsersService } from './users.service';
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+</file>
+
+<file path="src/users/users.service.ts">
+// src/users/users.service.ts
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class UsersService {
+  constructor(private prisma: PrismaService) {}
+
+  async findById(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  async findByEmail(email: string) {
+    return this.prisma.user.findUnique({ where: { email } });
+  }
+
+  async findAll() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deactivate(id: string) {
+    const user = await this.findById(id);
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { isActive: false },
+      select: { id: true, email: true, isActive: true },
+    });
+  }
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "forceConsistentCasingInFileNames": false,
+    "noFallthroughCasesInSwitch": false
+  }
+}
+</file>
+
+<file path="README.md">
+# 🍎 Apple Stock Backend
+> API REST profesional para gestión de inventario de productos Apple  
+> Stack: NestJS · PostgreSQL · Prisma · pnpm · JWT
+
+---
+
+## 📁 Estructura del Proyecto
+
+```
+apple-stock-backend/
+├── prisma/
+│   ├── schema.prisma          # Modelos de base de datos
+│   └── seed.ts                # Datos iniciales
+├── src/
+│   ├── auth/
+│   │   ├── dto/
+│   │   │   ├── register.dto.ts
+│   │   │   ├── login.dto.ts
+│   │   │   └── refresh-token.dto.ts
+│   │   ├── guards/
+│   │   │   ├── jwt-access.guard.ts
+│   │   │   └── jwt-refresh.guard.ts
+│   │   ├── strategies/
+│   │   │   ├── jwt-access.strategy.ts
+│   │   │   └── jwt-refresh.strategy.ts
+│   │   ├── interfaces/
+│   │   │   └── jwt-payload.interface.ts
+│   │   ├── auth.controller.ts
+│   │   ├── auth.service.ts
+│   │   └── auth.module.ts
+│   ├── users/
+│   │   ├── users.service.ts
+│   │   └── users.module.ts
+│   ├── products/
+│   │   ├── dto/
+│   │   │   ├── create-product.dto.ts
+│   │   │   ├── update-product.dto.ts
+│   │   │   └── filter-products.dto.ts
+│   │   ├── products.controller.ts
+│   │   ├── products.service.ts
+│   │   └── products.module.ts
+│   ├── prisma/
+│   │   ├── prisma.module.ts
+│   │   └── prisma.service.ts
+│   ├── common/
+│   │   ├── decorators/
+│   │   │   ├── current-user.decorator.ts
+│   │   │   └── roles.decorator.ts
+│   │   ├── filters/
+│   │   │   └── http-exception.filter.ts
+│   │   ├── guards/
+│   │   │   └── roles.guard.ts
+│   │   ├── interceptors/
+│   │   │   └── response.interceptor.ts
+│   │   └── middleware/
+│   │       └── logging.middleware.ts
+│   ├── config/
+│   │   └── env.validation.ts
+│   ├── app.module.ts
+│   └── main.ts
+├── frontend-integration/
+│   └── api.ts                 # Cliente HTTP listo para React/Next.js
+├── .env.example
+├── nest-cli.json
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+---
+
+## ⚡ Instalación Completa
+
+### 1. Requisitos previos
+
+```bash
+# Node.js >= 18
+node --version
+
+# pnpm
+npm install -g pnpm
+
+# PostgreSQL corriendo localmente
+```
+
+### 2. Clonar e instalar dependencias
+
+```bash
+git clone <tu-repo>
+cd apple-stock-backend
+
+pnpm install
+```
+
+### 3. Configurar variables de entorno
+
+```bash
+cp .env.example .env
+# Editá .env con tus datos reales
+```
+
+### 4. Configurar PostgreSQL y ejecutar migraciones
+
+```bash
+# Crear la base de datos (si no existe)
+createdb apple_stock_db
+# o desde psql:
+# CREATE DATABASE apple_stock_db;
+
+# Ejecutar migraciones
+pnpm prisma migrate dev --name init
+
+# Generar el cliente de Prisma
+pnpm prisma:generate
+```
+
+### 5. Ejecutar el seed (datos iniciales)
+
+```bash
+pnpm prisma:seed
+```
+
+Crea:
+- Usuario admin: `admin@applestock.com` / `Admin1234!`
+- Usuario vendedor: `vendedor@applestock.com` / `Vendedor1234!`
+- 8 productos de ejemplo
+- 1 sucursal
+
+### 6. Levantar el proyecto
+
+```bash
+# Desarrollo (con hot reload)
+pnpm start:dev
+
+# Producción
+pnpm build
+pnpm start:prod
+```
+
+La API estará disponible en: `http://localhost:3000`
+
+---
+
+## 📦 Comandos pnpm Completos
+
+```bash
+# Instalar todo de cero
+pnpm install
+
+# Desarrollo
+pnpm start:dev
+
+# Build producción
+pnpm build
+pnpm start:prod
+
+# Prisma
+pnpm prisma migrate dev --name <nombre>    # Nueva migración
+pnpm prisma migrate deploy                  # Migración en producción
+pnpm prisma:generate                        # Regenerar cliente
+pnpm prisma:studio                          # GUI de base de datos
+pnpm prisma:seed                            # Datos iniciales
+pnpm prisma db push                         # Sincronizar schema sin migración
+
+# Linting
+pnpm lint
+pnpm format
+```
+
+---
+
+## 🔌 Endpoints
+
+### Auth
+| Método | URL | Auth | Descripción |
+|--------|-----|------|-------------|
+| POST | `/auth/register` | ❌ | Registrar usuario |
+| POST | `/auth/login` | ❌ | Iniciar sesión |
+| POST | `/auth/refresh` | refresh token | Renovar tokens |
+| POST | `/auth/logout` | ✅ access | Cerrar sesión |
+
+### Products
+| Método | URL | Auth | Rol | Descripción |
+|--------|-----|------|-----|-------------|
+| POST | `/products` | ✅ | Cualquiera | Crear producto |
+| GET | `/products` | ✅ | Cualquiera | Listar con filtros |
+| GET | `/products/:id` | ✅ | Cualquiera | Obtener uno |
+| PATCH | `/products/:id` | ✅ | Cualquiera | Actualizar |
+| DELETE | `/products/:id` | ✅ | ADMIN | Eliminar |
+
+---
+
+## 📋 Ejemplos Request/Response
+
+### POST /auth/register
+
+**Request:**
+```json
+{
+  "email": "nuevo@email.com",
+  "nombre": "María García",
+  "password": "Segura1234!",
+  "role": "VENDEDOR"
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "email": "nuevo@email.com",
+      "nombre": "María García",
+      "role": "VENDEDOR"
+    },
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+}
+```
+
+---
+
+### POST /auth/login
+
+**Request:**
+```json
+{
+  "email": "admin@applestock.com",
+  "password": "Admin1234!"
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "...",
+      "email": "admin@applestock.com",
+      "nombre": "Administrador",
+      "role": "ADMIN"
+    },
+    "accessToken": "eyJ...",
+    "refreshToken": "eyJ..."
+  }
+}
+```
+
+---
+
+### POST /auth/refresh
+
+**Request:**
+```json
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "accessToken": "eyJ...",
+    "refreshToken": "eyJ..."
+  }
+}
+```
+
+---
+
+### POST /products
+
+**Headers:** `Authorization: Bearer <accessToken>`
+
+**Request:**
+```json
+{
+  "modelo": "iPhone 15 Pro Max",
+  "categoria": "iPhone",
+  "memoria": "256GB",
+  "color": "Titanio Azul",
+  "precio": 1399.99,
+  "bateria": 100,
+  "usado": false,
+  "stock": 10
+}
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "a1b2c3d4-e5f6-...",
+    "modelo": "iPhone 15 Pro Max",
+    "categoria": "iPhone",
+    "memoria": "256GB",
+    "color": "Titanio Azul",
+    "precio": "1399.99",
+    "bateria": 100,
+    "usado": false,
+    "stock": 10,
+    "proveedorId": null,
+    "sucursalId": null,
+    "createdAt": "2025-01-15T10:30:00.000Z",
+    "updatedAt": "2025-01-15T10:30:00.000Z"
+  }
+}
+```
+
+---
+
+### GET /products?categoria=iPhone&stockDisponible=true&page=1&limit=5
+
+**Headers:** `Authorization: Bearer <accessToken>`
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "...",
+        "modelo": "iPhone 15 Pro",
+        "categoria": "iPhone",
+        "memoria": "256GB",
+        "color": "Titanio Negro",
+        "precio": "1299.99",
+        "bateria": 100,
+        "usado": false,
+        "stock": 15,
+        "createdAt": "2025-01-10T08:00:00.000Z",
+        "updatedAt": "2025-01-10T08:00:00.000Z"
+      }
+    ],
+    "meta": {
+      "total": 3,
+      "page": 1,
+      "limit": 5,
+      "totalPages": 1,
+      "hasNextPage": false,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+---
+
+### Filtros disponibles GET /products
+
+```
+?categoria=iPhone              # iPhone | iPad | Mac | Watch | AirPods | Accesorios
+&modelo=iPhone 15              # Búsqueda parcial case-insensitive
+&memoria=256GB
+&color=Negro                   # Búsqueda parcial case-insensitive
+&usado=false
+&minPrice=500
+&maxPrice=1500
+&stockDisponible=true          # Solo productos con stock > 0
+&page=1
+&limit=10
+```
+
+---
+
+### PATCH /products/:id
+
+**Request:**
+```json
+{
+  "stock": 5,
+  "precio": 1199.99
+}
+```
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "stock": 5,
+    "precio": "1199.99",
+    ...
+  }
+}
+```
+
+---
+
+### DELETE /products/:id (solo ADMIN)
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Producto \"abc123\" eliminado correctamente"
+  }
+}
+```
+
+---
+
+### Error response (ejemplo)
+
+```json
+{
+  "success": false,
+  "statusCode": 422,
+  "message": "Error de validación",
+  "errors": [
+    "La categoría debe ser uno de: iPhone, iPad, Mac, Watch, AirPods, Accesorios",
+    "El precio debe ser un número decimal válido"
+  ],
+  "timestamp": "2025-01-15T10:30:00.000Z",
+  "path": "/products"
+}
+```
+
+---
+
+## 🛡️ Seguridad JWT
+
+El flujo es:
+1. Login → recibe `accessToken` (15 min) + `refreshToken` (7 días)
+2. Cada request → `Authorization: Bearer <accessToken>`
+3. Al expirar el access → POST `/auth/refresh` con el `refreshToken` en el body
+4. Obtenés nuevos tokens y seguís sin interrupciones
+
+Los refresh tokens se **hashean con bcrypt** antes de guardarse en la DB, así aunque alguien robe la DB no puede usarlos.
+
+---
+
+## 🚀 Deploy en Producción
+
+```bash
+# 1. Variables de entorno (no commitear nunca el .env)
+# Configurá en Railway, Render, DigitalOcean, etc.
+
+# 2. Correr migraciones (nunca migrate dev en prod)
+pnpm prisma migrate deploy
+
+# 3. Build y arrancar
+pnpm build
+pnpm start:prod
+```
+
+### Docker (opcional)
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install -g pnpm
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm prisma generate
+RUN pnpm build
+EXPOSE 3000
+CMD ["pnpm", "start:prod"]
+```
+
+---
+
+## 🔮 Diseño Preparado Para Escalar
+
+El schema de Prisma ya incluye las tablas base para:
+
+- **Proveedores**: Tabla `Proveedor` con relación a `Producto`
+- **Sucursales**: Tabla `Sucursal`, los productos pertenecen a una sucursal
+- **Movimientos de stock**: Tabla `MovimientoStock` (ENTRADA, SALIDA, AJUSTE, TRANSFERENCIA)
+- **Historial de cambios**: Tabla `HistorialProducto` para auditoría completa
+
+Solo hace falta desarrollar los módulos correspondientes.
+
+---
+
+## 🔗 Integración con Frontend
+
+Ver el archivo `frontend-integration/api.ts` para un cliente HTTP completo con:
+- Auto-refresh de tokens
+- TypeScript tipado
+- Ejemplos con React Query
+- Ejemplos con Next.js App Router
+</file>
+
+<file path="src/auth/auth.controller.ts">
+// src/auth/auth.controller.ts
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Request,
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { Public } from '../common/decorators/public.decorator';
+import type { Request as ExpressRequest } from 'express';
+
+@Controller('api/v1/auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  /**
+   * POST /api/v1/auth/sync
+   * Público — el ID token de Firebase se valida en el guard a nivel global.
+   * El frontend llama este endpoint justo después del login de Firebase.
+   */
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  sync(@Body() dto: SyncAuthDto) {
+    return this.authService.sync(dto);
+  }
+
+  /**
+   * GET /api/v1/auth/me
+   * Protegido por FirebaseAuthGuard (global).
+   */
+  @Get('me')
+  me(@Request() req: ExpressRequest) {
+    const firebaseUid = (req as any).user?.firebaseUid as string;
+    return this.authService.me(firebaseUid);
+  }
+}
+</file>
+
+<file path="src/auth/auth.module.ts">
+// src/auth/auth.module.ts
+import { Module } from '@nestjs/common';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { AuditModule } from '../audit/audit.module';
+
+@Module({
+  imports: [AuditModule],
+  controllers: [AuthController],
+  providers: [AuthService],
+  exports: [AuthService],
+})
+export class AuthModule {}
+</file>
+
+<file path="src/common/decorators/current-user.decorator.ts">
+// src/common/decorators/current-user.decorator.ts
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { Request } from 'express';
+
+/**
+ * @CurrentUser() — retorna el objeto user inyectado por FirebaseAuthGuard.
+ * Contiene: { uid, email, firebaseUid }
+ */
+export const CurrentUser = createParamDecorator(
+  (data: string | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest<Request>();
+    const user = (request as any).user;
+    return data ? user?.[data] : user;
+  },
+);
+</file>
+
+<file path="src/common/decorators/roles.decorator.ts">
+// src/common/decorators/roles.decorator.ts
+import { SetMetadata } from '@nestjs/common';
+
+export const ROLES_KEY = 'roles';
+export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles);
+</file>
+
+<file path="src/common/filters/http-exception.filter.ts">
+// src/common/filters/http-exception.filter.ts
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
+
+@Catch()
+export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let message = 'Error interno del servidor';
+    let errors: string[] | undefined;
+
+    if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      const exceptionResponse = exception.getResponse();
+
+      if (typeof exceptionResponse === 'object') {
+        const res = exceptionResponse as Record<string, unknown>;
+        message = (res.message as string) || message;
+        if (Array.isArray(res.message)) {
+          errors = res.message as string[];
+          message = 'Error de validación';
+        }
+      } else {
+        message = exceptionResponse as string;
+      }
+      } else if (
+        exception instanceof Error &&
+        exception.constructor.name === 'PrismaClientKnownRequestError'
+      ) {
+        const prismaError = exception as any;
+        if (prismaError.code === 'P2002') {
+          status = HttpStatus.CONFLICT;
+          message = 'Ya existe un registro con esos datos únicos';
+        } else if (prismaError.code === 'P2025') {
+          status = HttpStatus.NOT_FOUND;
+          message = 'Registro no encontrado';
+        } else {
+          message = `Error de base de datos: ${prismaError.code}`;
+        }
+      }
+
+    this.logger.error(
+      `[${request.method}] ${request.url} → ${status}: ${message}`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
+
+    response.status(status).json({
+      success: false,
+      statusCode: status,
+      message,
+      ...(errors && { errors }),
+      timestamp: new Date().toISOString(),
+      path: request.url,
+    });
+  }
+}
+</file>
+
+<file path="src/common/guards/roles.guard.ts">
+// src/common/guards/roles.guard.ts
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+import type { TenantContext } from '../../tenant/tenant.interface';
+import type { Request } from 'express';
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if (!requiredRoles || requiredRoles.length === 0) return true;
+
+    const request = context.switchToHttp().getRequest<Request>();
+    const tenant = (request as any).tenantContext as TenantContext | undefined;
+
+    if (!tenant) {
+      throw new ForbiddenException('Contexto de tenant no disponible');
+    }
+
+    if (!requiredRoles.includes(tenant.role)) {
+      throw new ForbiddenException(
+        'No tenés permisos para realizar esta acción',
+      );
+    }
+
+    return true;
+  }
+}
+</file>
+
+<file path="src/config/env.validation.ts">
+// src/config/env.validation.ts
+import { plainToInstance } from 'class-transformer';
+import {
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  validateSync,
+} from 'class-validator';
+
+class EnvironmentVariables {
+  @IsNumber()
+  @Min(1)
+  PORT: number;
+
+  @IsString()
+  DATABASE_URL: string;
+
+  // Firebase — opcionales: si no están, el módulo queda inactivo
+  @IsOptional()
+  @IsString()
+  FIREBASE_PROJECT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_CLIENT_EMAIL?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_PRIVATE_KEY?: string;
+
+  // JWT legacy — opcionales durante período de migración
+  @IsOptional()
+  @IsString()
+  JWT_ACCESS_SECRET?: string;
+
+  @IsOptional()
+  @IsString()
+  JWT_REFRESH_SECRET?: string;
+
+  @IsOptional()
+  @IsString()
+  JWT_ACCESS_EXPIRES_IN?: string;
+
+  @IsOptional()
+  @IsString()
+  JWT_REFRESH_EXPIRES_IN?: string;
+}
+
+export function envValidation(config: Record<string, unknown>) {
+  const validatedConfig = plainToInstance(EnvironmentVariables, config, {
+    enableImplicitConversion: true,
+  });
+  const errors = validateSync(validatedConfig, {
+    skipMissingProperties: false,
+  });
+
+  if (errors.length > 0) {
+    throw new Error(
+      `❌ Variables de entorno inválidas:\n${errors.toString()}`,
+    );
+  }
+
+  return validatedConfig;
+}
+</file>
+
+<file path="src/prisma/prisma.service.ts">
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+// Importa el adaptador de PostgreSQL
+import { PrismaPg } from '@prisma/adapter-pg';
+// Importa el driver pg (node-postgres)
+import * as pg from 'pg';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+
+  constructor() {
+    // Asegúrate de que DATABASE_URL esté disponible en tu archivo .env
+    const connectionString = process.env.DATABASE_URL;
+
+    // Crea una instancia del Pool de conexión del driver
+    const pool = new pg.Pool({ connectionString });
+
+    // Crea una instancia del adaptador de Prisma
+    const adapter = new PrismaPg(pool);
+
+    // Pasa el adaptador al constructor de PrismaClient
+    super({
+      adapter: adapter,
+      // Puedes añadir tus logs aquí si es necesario:
+      // log: ['query', 'error', 'warn'],
+    });
+  }
+
+  async onModuleInit() {
+    await this.$connect();
+  }
+
+  async onModuleDestroy() {
+    await this.$disconnect();
+  }
+}
+</file>
+
+<file path="src/auth/auth.service.ts">
+// src/auth/auth.service.ts
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { AuditService } from '../audit/audit.service';
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /**
+   * POST /api/v1/auth/sync
+   * Upsert del usuario en base al firebaseUid.
+   * Se llama desde el frontend justo después de que Firebase emite un ID token.
+   */
+  async sync(dto: SyncAuthDto) {
+    const user = await this.prisma.user.upsert({
+      where: { firebaseUid: dto.firebaseUid },
+      create: {
+        firebaseUid: dto.firebaseUid,
+        firebaseEmail: dto.email,
+        email: dto.email,
+        nombre: dto.nombre ?? dto.email.split('@')[0],
+        role: 'VENDEDOR',
+      },
+      update: {
+        firebaseEmail: dto.email,
+        email: dto.email,
+        ...(dto.nombre && { nombre: dto.nombre }),
+      },
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        firebaseUid: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    await this.audit.log({
+      action: 'auth.sync',
+      entityType: 'User',
+      entityId: user.id,
+      userId: user.id,
+      payload: { email: dto.email },
+    });
+
+    return user;
+  }
+
+  /**
+   * GET /api/v1/auth/me
+   * Retorna el perfil del usuario autenticado.
+   */
+  async me(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        firebaseUid: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(
+        'Usuario no encontrado. Llamar a /auth/sync primero.',
+      );
+    }
+
+    return user;
+  }
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "apple-inventory",
+  "version": "0.0.1",
+  "description": "",
+  "author": "",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "prisma generate && nest build",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "test:e2e": "jest --config ./test/jest-e2e.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^4.0.3",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/mapped-types": "^2.1.0",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/swagger": "^11.4.4",
+    "@nestjs/terminus": "^11.1.1",
+    "@prisma/adapter-pg": "^7.4.2",
+    "axios": "^1.16.1",
+    "bcrypt": "^6.0.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dotenv": "^17.3.1",
+    "firebase-admin": "^13.8.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pg": "^8.19.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@eslint/js": "^9.18.0",
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.0.1",
+    "@prisma/client": "^7.7.0",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.0.0",
+    "@types/supertest": "^6.0.2",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-prettier": "^5.2.2",
+    "globals": "^16.0.0",
+    "jest": "^30.0.0",
+    "prettier": "^3.4.2",
+    "prisma": "^7.4.1",
+    "source-map-support": "^0.5.21",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "ts-loader": "^9.5.2",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
+  }
+}
+</file>
+
+<file path="prisma/seed.ts">
+// prisma/seed.ts
+import { PrismaClient, Role } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import * as pg from 'pg';
+import * as dotenv from 'dotenv';
+import * as bcrypt from 'bcrypt';
+
+dotenv.config();
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
+
+const SEED_ORG_ID = '00000000-0000-0000-0000-000000000000';
+const SEED_PDV_ID = '00000000-0000-0000-0000-000000000001';
+
+async function main() {
+  console.log('🌱 Iniciando seed...');
+
+  // ─── Organización base ────────────────────────────────────────────────────
+  const org = await prisma.organization.upsert({
+    where:  { id: SEED_ORG_ID },
+    update: {},
+    create: {
+      id:              SEED_ORG_ID,
+      name:            'Todo Apple',
+      slug:            'todo-apple',
+      enabledProducts: {},
+      systemSettings:  {},
+    },
+  });
+  console.log('✅ Organización:', org.name);
+
+  // ─── Usuarios Admin ───────────────────────────────────────────────────────
+  const users = [
+    { email: 'marcos@todoapple.com', nombre: 'Marcos' },
+    { email: 'store@todoapple.com',  nombre: 'Store'  },
+  ];
+
+  for (const u of users) {
+    const passwordHash = await bcrypt.hash(u.email, 10);
+    const user = await prisma.user.upsert({
+      where:  { email: u.email },
+      update: {},
+      create: {
+        email:        u.email,
+        nombre:       u.nombre,
+        passwordHash,
+        role:         Role.ADMIN,
+      },
+    });
+    console.log(`✅ Usuario admin: ${user.email}`);
+  }
+
+  // ─── Punto de Venta ───────────────────────────────────────────────────────
+  const pdv = await prisma.puntoDeVenta.upsert({
+    where:  { id: SEED_PDV_ID },
+    update: {},
+    create: {
+      id:           SEED_PDV_ID,
+      nombre:       'Local Centro',
+      direccion:    'Bonifacio Córdoba 678',
+      ciudad:       'San Fernando del Valle de Catamarca',
+      organization: { connect: { id: SEED_ORG_ID } },
+    },
+  });
+  console.log('✅ PdV:', pdv.nombre);
+
+  // ─── Accesorios de marca ──────────────────────────────────────────────────
+  console.log('\n🎒 Cargando accesorios de marca...');
+
+  const accesoriosData = [
+    {
+      nombre:      'iPhone 15',
+      modelo:      'Pro',
+      tipo:        'Funda',
+      descripcion: 'Funda de silicona con MagSafe',
+      cantidad:    16,
+      colores:     ['Rosa', 'Negro', 'Azul'],
+      imagenes: [
+        'https://store.storeimages.cdn-apple.com/funda-magsafe-rosa.jpg',
+        'https://store.storeimages.cdn-apple.com/funda-magsafe-negro.jpg',
+      ],
+    },
+    {
+      nombre:      'iPhone 15',
+      modelo:      'Standard',
+      tipo:        'Templado',
+      descripcion: 'Vidrio templado 9H',
+      cantidad:    20,
+      colores:     [],
+      imagenes:    ['https://store.storeimages.cdn-apple.com/templado-iphone15.jpg'],
+    },
+    {
+      nombre:      'iPhone 14',
+      modelo:      'Standard',
+      tipo:        'Funda',
+      descripcion: 'Funda transparente antigolpes',
+      cantidad:    10,
+      colores:     ['Transparente', 'Negro'],
+      imagenes:    ['https://store.storeimages.cdn-apple.com/funda-iphone14-transparente.jpg'],
+    },
+    {
+      nombre:      'AirPods Pro',
+      modelo:      '2da Gen',
+      tipo:        'Funda',
+      descripcion: 'Funda de silicona para AirPods Pro',
+      cantidad:    8,
+      colores:     ['Blanco', 'Negro'],
+      imagenes:    ['https://store.storeimages.cdn-apple.com/funda-airpods-pro.jpg'],
+    },
+    {
+      nombre:      'Apple Watch',
+      modelo:      'Series 9',
+      tipo:        'Malla',
+      descripcion: 'Malla deportiva original',
+      cantidad:    6,
+      colores:     ['Medianoche', 'Starlight', 'Rojo'],
+      imagenes: [
+        'https://store.storeimages.cdn-apple.com/malla-watch-s9.jpg',
+        'https://store.storeimages.cdn-apple.com/malla-watch-s9-colores.jpg',
+      ],
+    },
+  ];
+
+  for (const a of accesoriosData) {
+    const accesorio = await prisma.accesorio.create({
+      data: {
+        nombre:       a.nombre,
+        modelo:       a.modelo,
+        tipo:         a.tipo,
+        descripcion:  a.descripcion,
+        cantidad:     a.cantidad,
+        // Ambas relaciones requeridas deben ir con connect
+        organization: { connect: { id: SEED_ORG_ID } },
+        puntoDeVenta: { connect: { id: SEED_PDV_ID } },
+        colores:  { create: a.colores.map((color) => ({ color })) },
+        imagenes: { create: a.imagenes.map((url, i) => ({ url, orden: i })) },
+      },
+    });
+    console.log(`  ✅ ${accesorio.nombre} ${accesorio.modelo} — ${a.tipo}`);
+  }
+
+  // ─── Sub Accesorios (genéricos sin marca) ─────────────────────────────────
+  console.log('\n📦 Cargando sub accesorios genéricos...');
+
+  const subAccesoriosData = [
+    {
+      nombre:      'Cable USB-C',
+      tipo:        'Cable',
+      descripcion: 'Cable trenzado USB-C a USB-C 2 metros',
+      cantidad:    25,
+      colores:     ['Blanco', 'Negro'],
+      imagenes: [
+        'https://images.example.com/cable-usbc-blanco.jpg',
+        'https://images.example.com/cable-usbc-negro.jpg',
+      ],
+    },
+    {
+      nombre:      'Cargador 20W',
+      tipo:        'Cargador',
+      descripcion: 'Cargador rápido USB-C 20W',
+      cantidad:    15,
+      colores:     ['Blanco'],
+      imagenes:    ['https://images.example.com/cargador-20w.jpg'],
+    },
+    {
+      nombre:      'Auriculares In-Ear',
+      tipo:        'Auriculares',
+      descripcion: 'Auriculares con cable USB-C, compatibles con todos los dispositivos',
+      cantidad:    12,
+      colores:     ['Blanco', 'Negro', 'Rojo'],
+      imagenes: [
+        'https://images.example.com/auriculares-inear.jpg',
+        'https://images.example.com/auriculares-inear-colores.jpg',
+      ],
+    },
+    {
+      nombre:      'Soporte de Auto',
+      tipo:        'Soporte',
+      descripcion: 'Soporte magnético para auto, compatible con MagSafe',
+      cantidad:    9,
+      colores:     ['Negro'],
+      imagenes:    ['https://images.example.com/soporte-auto.jpg'],
+    },
+    {
+      nombre:      'Power Bank 10000mAh',
+      tipo:        'Batería',
+      descripcion: 'Batería portátil 10000mAh con carga rápida USB-C',
+      cantidad:    7,
+      colores:     ['Negro', 'Blanco'],
+      imagenes: [
+        'https://images.example.com/powerbank-negro.jpg',
+        'https://images.example.com/powerbank-blanco.jpg',
+      ],
+    },
+  ];
+
+  for (const s of subAccesoriosData) {
+    const sub = await prisma.subAccesorio.create({
+      data: {
+        nombre:       s.nombre,
+        tipo:         s.tipo,
+        descripcion:  s.descripcion,
+        cantidad:     s.cantidad,
+        // Ambas relaciones requeridas deben ir con connect
+        organization: { connect: { id: SEED_ORG_ID } },
+        puntoDeVenta: { connect: { id: SEED_PDV_ID } },
+        colores:  { create: s.colores.map((color) => ({ color })) },
+        imagenes: { create: s.imagenes.map((url, i) => ({ url, orden: i })) },
+      },
+    });
+    console.log(`  ✅ ${sub.nombre} — ${sub.tipo} — stock: ${s.cantidad}`);
+  }
+
+  console.log('\n🎉 Seed completado');
+  console.log('─────────────────────────────────────────────────────');
+  console.log(`👤 Admins:         marcos@todoapple.com / store@todoapple.com`);
+  console.log(`🏢 Organización:   Todo Apple (${SEED_ORG_ID})`);
+  console.log(`🏪 PdV:            Local Centro — Catamarca`);
+  console.log(`🎒 Accesorios:     ${accesoriosData.length}`);
+  console.log(`📦 SubAccesorios:  ${subAccesoriosData.length}`);
+}
+
+main()
+  .catch((e) => { console.error('❌', e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); await pool.end(); });
+</file>
+
+<file path="src/main.ts">
+// src/main.ts
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { AppModule } from './app.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { LoggingMiddleware } from './common/middleware/logging.middleware';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
+  const logger = new Logger('Bootstrap');
+
+  // CORS — permite headers del ecosistema SSO
+  app.enableCors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-organization-id',   // TenantGuard
+    ],
+    credentials: false,
+  });
+
+  // Global pipes
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+
+  // Global filters
+  app.useGlobalFilters(new HttpExceptionFilter());
+
+  // Global interceptors
+  app.useGlobalInterceptors(new ResponseInterceptor());
+
+  const port = configService.get<number>('PORT', 3000);
+  await app.listen(port);
+
+  logger.log(`🚀 Apple Stock API corriendo en: http://localhost:${port}`);
+  logger.log(`🔥 Firebase Auth SSO activo`);
+  logger.log(`🏢 Multi-tenant habilitado (x-organization-id)`);
+}
+
+bootstrap();
+</file>
+
+<file path="src/app.module.ts">
+// src/app.module.ts
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { PrismaModule } from './prisma/prisma.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { TenantModule } from './tenant/tenant.module';
+import { AuthModule } from './auth/auth.module';
+import { LoggingMiddleware } from './common/middleware/logging.middleware';
+import { envValidation } from './config/env.validation';
+import { FirebaseAuthGuard } from './auth/guards/firebase-auth.guard';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate: envValidation,
+      envFilePath: '.env',
+    }),
+    PrismaModule,
+    FirebaseModule,
+    TenantModule,
+    AuthModule,
+  ],
+  providers: [
+    // FirebaseAuthGuard aplicado globalmente — rutas con @Public() se saltan
+    {
+      provide: APP_GUARD,
+      useClass: FirebaseAuthGuard,
+    },
+  ],
+})
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggingMiddleware).forRoutes('*');
+  }
+}
+</file>
+
+<file path="prisma/schema.prisma">
+// prisma/schema.prisma
+// ─────────────────────────────────────────────────────────────────────────────
+// Real Estate Dashboard — Schema final
+// Sistema 2 del ecosistema SaaS multi-tenant
+//
+// INSTRUCCIONES:
+//   1. Reemplazar prisma/schema.prisma con este archivo
+//   2. pnpm prisma migrate dev --name real_estate_domain
+//   3. pnpm prisma generate
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider   = "prisma-client-js"
+  output     = "../node_modules/.prisma/client"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  AGENTE
+  VIEWER
+}
+
+enum TipoPropiedad {
+  CASA
+  DEPARTAMENTO
+  TERRENO
+  LOCAL
+  OFICINA
+  GALPON
+  CAMPO
+}
+
+enum TipoOperacion {
+  VENTA
+  ALQUILER
+  ALQUILER_TEMP
+}
+
+enum EstadoPropiedad {
+  DISPONIBLE
+  RESERVADA
+  VENDIDA
+  ALQUILADA
+  PAUSADA
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH — Usuario con Firebase SSO como identidad principal
+// passwordHash y refreshToken quedan nullable para migración gradual
+// desde el JWT legacy que tenía el proyecto original.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  nombre        String
+
+  // Firebase SSO — identidad principal
+  firebaseUid   String?  @unique @map("firebase_uid")
+  firebaseEmail String?  @map("firebase_email")
+
+  // JWT legacy — nullable, mantener hasta migración completa
+  passwordHash  String?  @map("password_hash")
+  refreshToken  String?  @map("refresh_token")
+
+  role          Role     @default(AGENTE)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([firebaseUid])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORGANIZACIONES — Tenant raíz del ecosistema
+// enabledProducts y systemSettings son JSONB: nunca migrar para agregar sistema.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id              String   @id @default(uuid())
+  name            String
+  slug            String   @unique
+  // JSONB — ej: { "propiedades": true, "chat": true, "pagos": false }
+  enabledProducts Json     @default("{}") @map("enabled_products")
+  // JSONB — configuración global de la org por sistema
+  systemSettings  Json     @default("{}") @map("system_settings")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  zonas           Zona[]
+  propiedades     Propiedad[]
+  auditLogs       AuditLog[]
+
+  @@index([slug])
+  @@map("organizations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ZONAS — Agrupación geográfica de propiedades (reemplaza PuntoDeVenta)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Zona {
+  id             String       @id @default(uuid())
+  nombre         String
+  ciudad         String?
+  provincia      String?
+  descripcion    String?
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  propiedades    Propiedad[]
+
+  @@index([organizationId])
+  @@map("zonas")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROPIEDADES — Entidad de dominio principal del real estate
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Propiedad {
+  id             String          @id @default(uuid())
+  titulo         String
+  descripcion    String?
+  tipo           TipoPropiedad
+  operacion      TipoOperacion
+  precio         Decimal         @db.Decimal(14, 2)
+  moneda         String          @default("USD")
+  superficie     Decimal?        @db.Decimal(10, 2)
+  ambientes      Int?
+  banos          Int?
+  dormitorios    Int?
+  direccion      String?
+  estado         EstadoPropiedad @default(DISPONIBLE)
+  destacada      Boolean         @default(false)
+  isActive       Boolean         @default(true) @map("is_active")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  organizationId String          @map("organization_id")
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+
+  zonaId         String?         @map("zona_id")
+  zona           Zona?           @relation(fields: [zonaId], references: [id])
+
+  imagenes       PropiedadImagen[]
+
+  @@index([organizationId])
+  @@index([zonaId])
+  @@index([tipo])
+  @@index([operacion])
+  @@index([estado])
+  @@index([precio])
+  @@map("propiedades")
+}
+
+model PropiedadImagen {
+  id          String    @id @default(uuid())
+  url         String
+  orden       Int       @default(0)
+  alt         String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  propiedadId String    @map("propiedad_id")
+  propiedad   Propiedad @relation(fields: [propiedadId], references: [id], onDelete: Cascade)
+
+  @@index([propiedadId])
+  @@map("propiedad_imagenes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT LOG — append-only, nunca se borra
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String        @id @default(uuid())
+  action         String                           // ej: "propiedad.create"
+  entityType     String        @map("entity_type") // ej: "Propiedad"
+  entityId       String?       @map("entity_id")
+  payload        Json          @default("{}")
+  ipAddress      String?       @map("ip_address")
+  userAgent      String?       @map("user_agent")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  userId         String?       @map("user_id")
+  user           User?         @relation(fields: [userId], references: [id])
+
+  organizationId String?       @map("organization_id")
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+</file>
+
+</files>

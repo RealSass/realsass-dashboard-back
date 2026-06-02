@@ -4,48 +4,41 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string) {
-    return this.prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
-        id: true,
-        email: true,
-        nombre: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
       },
     });
-  }
 
-  async findByEmail(email: string) {
-    return this.prisma.user.findUnique({ where: { email } });
-  }
-
-  async findAll() {
-    return this.prisma.user.findMany({
-      select: {
-        id: true,
-        email: true,
-        nombre: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
-  async deactivate(id: string) {
-    const user = await this.findById(id);
     if (!user) throw new NotFoundException('Usuario no encontrado');
+    return user;
+  }
 
-    return this.prisma.user.update({
-      where: { id },
-      data: { isActive: false },
-      select: { id: true, email: true, isActive: true },
+  async findByFirebaseUid(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
     });
+
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    return user;
   }
 }

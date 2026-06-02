@@ -1,65 +1,83 @@
 // src/config/env.validation.ts
 import { plainToInstance } from 'class-transformer';
 import {
+  IsEnum,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
-  Min,
+  IsUrl,
   validateSync,
 } from 'class-validator';
 
-class EnvironmentVariables {
+enum Environment {
+  Development = 'development',
+  Production  = 'production',
+  Test        = 'test',
+}
+
+class EnvVars {
+  @IsEnum(Environment)
+  @IsOptional()
+  NODE_ENV: Environment = Environment.Development;
+
   @IsNumber()
-  @Min(1)
-  PORT: number;
+  @IsOptional()
+  PORT: number = 3001;
 
   @IsString()
+  @IsNotEmpty()
   DATABASE_URL: string;
 
-  // Firebase — opcionales: si no están, el módulo queda inactivo
-  @IsOptional()
+  // Firebase Admin SDK
   @IsString()
-  FIREBASE_PROJECT_ID?: string;
+  @IsNotEmpty()
+  FIREBASE_PROJECT_ID: string;
 
-  @IsOptional()
   @IsString()
-  FIREBASE_CLIENT_EMAIL?: string;
+  @IsNotEmpty()
+  FIREBASE_CLIENT_EMAIL: string;
 
-  @IsOptional()
   @IsString()
-  FIREBASE_PRIVATE_KEY?: string;
+  @IsNotEmpty()
+  FIREBASE_PRIVATE_KEY: string;
 
-  // JWT legacy — opcionales durante período de migración
-  @IsOptional()
+  // Sistema 1 — URL interna del real-back
   @IsString()
-  JWT_ACCESS_SECRET?: string;
+  @IsNotEmpty()
+  REAL_BACK_URL: string;
 
-  @IsOptional()
+  // CORS
   @IsString()
-  JWT_REFRESH_SECRET?: string;
+  @IsOptional()
+  ALLOWED_ORIGINS: string = 'http://localhost:3002';
 
+  // Rate limiting
+  @IsNumber()
   @IsOptional()
-  @IsString()
-  JWT_ACCESS_EXPIRES_IN?: string;
+  THROTTLE_TTL_MS: number = 60000;
 
+  @IsNumber()
   @IsOptional()
-  @IsString()
-  JWT_REFRESH_EXPIRES_IN?: string;
+  THROTTLE_LIMIT: number = 100;
 }
 
 export function envValidation(config: Record<string, unknown>) {
-  const validatedConfig = plainToInstance(EnvironmentVariables, config, {
+  const validated = plainToInstance(EnvVars, config, {
     enableImplicitConversion: true,
   });
-  const errors = validateSync(validatedConfig, {
+
+  const errors = validateSync(validated, {
     skipMissingProperties: false,
   });
 
   if (errors.length > 0) {
     throw new Error(
-      `❌ Variables de entorno inválidas:\n${errors.toString()}`,
+      `[ENV] Variables de entorno inválidas:\n${errors
+        .map((e) => Object.values(e.constraints ?? {}).join(', '))
+        .join('\n')}`,
     );
   }
 
-  return validatedConfig;
+  return validated;
 }

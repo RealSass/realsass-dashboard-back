@@ -1,9 +1,11 @@
 // prisma/schema.prisma
 // ─────────────────────────────────────────────────────────────────────────────
-// Apple Stock — Schema final con Firebase Auth SSO + multi-tenancy
+// Real Estate Dashboard — Schema final
+// Sistema 2 del ecosistema SaaS multi-tenant
+//
 // INSTRUCCIONES:
 //   1. Reemplazar prisma/schema.prisma con este archivo
-//   2. pnpm prisma migrate dev --name add_firebase_multitenant
+//   2. pnpm prisma migrate dev --name real_estate_domain
 //   3. pnpm prisma generate
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -23,14 +25,38 @@ datasource db {
 
 enum Role {
   ADMIN
-  VENDEDOR
+  AGENTE
   VIEWER
 }
 
+enum TipoPropiedad {
+  CASA
+  DEPARTAMENTO
+  TERRENO
+  LOCAL
+  OFICINA
+  GALPON
+  CAMPO
+}
+
+enum TipoOperacion {
+  VENTA
+  ALQUILER
+  ALQUILER_TEMP
+}
+
+enum EstadoPropiedad {
+  DISPONIBLE
+  RESERVADA
+  VENDIDA
+  ALQUILADA
+  PAUSADA
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// AUTH — Usuario ahora tiene firebaseUid como identidad principal
-// El passwordHash queda nullable para migración gradual.
-// Un usuario puede autenticarse con Firebase o con el JWT legacy (deprecado).
+// AUTH — Usuario con Firebase SSO como identidad principal
+// passwordHash y refreshToken quedan nullable para migración gradual
+// desde el JWT legacy que tenía el proyecto original.
 // ─────────────────────────────────────────────────────────────────────────────
 
 model User {
@@ -38,20 +64,19 @@ model User {
   email         String   @unique
   nombre        String
 
-  // Firebase SSO — identidad principal en el ecosistema
+  // Firebase SSO — identidad principal
   firebaseUid   String?  @unique @map("firebase_uid")
   firebaseEmail String?  @map("firebase_email")
 
-  // JWT legacy — nullable: se mantiene para usuarios existentes hasta migración
+  // JWT legacy — nullable, mantener hasta migración completa
   passwordHash  String?  @map("password_hash")
   refreshToken  String?  @map("refresh_token")
 
-  role          Role     @default(VENDEDOR)
+  role          Role     @default(AGENTE)
   isActive      Boolean  @default(true) @map("is_active")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  // Relaciones
   auditLogs     AuditLog[]
 
   @@index([email])
@@ -68,7 +93,7 @@ model Organization {
   id              String   @id @default(uuid())
   name            String
   slug            String   @unique
-  // JSONB — ej: { "applestock": true, "payments": false, "chat": true, "ads": true }
+  // JSONB — ej: { "propiedades": true, "chat": true, "pagos": false }
   enabledProducts Json     @default("{}") @map("enabled_products")
   // JSONB — configuración global de la org por sistema
   systemSettings  Json     @default("{}") @map("system_settings")
@@ -76,25 +101,24 @@ model Organization {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  // Relaciones
-  puntosDeVenta PuntoDeVenta[]
-  accesorios    Accesorio[]
-  subAccesorios SubAccesorio[]
-  auditLogs     AuditLog[]
+  zonas           Zona[]
+  propiedades     Propiedad[]
+  auditLogs       AuditLog[]
 
   @@index([slug])
   @@map("organizations")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PUNTOS DE VENTA — Ahora pertenecen a una organización
+// ZONAS — Agrupación geográfica de propiedades (reemplaza PuntoDeVenta)
 // ─────────────────────────────────────────────────────────────────────────────
 
-model PuntoDeVenta {
+model Zona {
   id             String       @id @default(uuid())
   nombre         String
-  direccion      String?
   ciudad         String?
+  provincia      String?
+  descripcion    String?
   isActive       Boolean      @default(true) @map("is_active")
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
@@ -102,120 +126,64 @@ model PuntoDeVenta {
   organizationId String       @map("organization_id")
   organization   Organization @relation(fields: [organizationId], references: [id])
 
-  accesorios     Accesorio[]
-  subAccesorios  SubAccesorio[]
+  propiedades    Propiedad[]
 
   @@index([organizationId])
-  @@map("puntos_de_venta")
+  @@map("zonas")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ACCESORIOS DE MARCA (ej. funda para iPhone 17 Pro)
+// PROPIEDADES — Entidad de dominio principal del real estate
 // ─────────────────────────────────────────────────────────────────────────────
 
-model Accesorio {
-  id             String   @id @default(uuid())
-  nombre         String
-  modelo         String
-  tipo           String
+model Propiedad {
+  id             String          @id @default(uuid())
+  titulo         String
   descripcion    String?
-  cantidad       Int      @default(0)
-  isActive       Boolean  @default(true) @map("is_active")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  tipo           TipoPropiedad
+  operacion      TipoOperacion
+  precio         Decimal         @db.Decimal(14, 2)
+  moneda         String          @default("USD")
+  superficie     Decimal?        @db.Decimal(10, 2)
+  ambientes      Int?
+  banos          Int?
+  dormitorios    Int?
+  direccion      String?
+  estado         EstadoPropiedad @default(DISPONIBLE)
+  destacada      Boolean         @default(false)
+  isActive       Boolean         @default(true) @map("is_active")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
-  organizationId String       @map("organization_id")
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String          @map("organization_id")
+  organization   Organization    @relation(fields: [organizationId], references: [id])
 
-  puntoDeVentaId String       @map("punto_de_venta_id")
-  puntoDeVenta   PuntoDeVenta @relation(fields: [puntoDeVentaId], references: [id])
+  zonaId         String?         @map("zona_id")
+  zona           Zona?           @relation(fields: [zonaId], references: [id])
 
-  colores        AccesorioColor[]
-  imagenes       AccesorioImagen[]
+  imagenes       PropiedadImagen[]
 
   @@index([organizationId])
-  @@index([puntoDeVentaId])
-  @@index([nombre])
+  @@index([zonaId])
   @@index([tipo])
-  @@map("accesorios")
+  @@index([operacion])
+  @@index([estado])
+  @@index([precio])
+  @@map("propiedades")
 }
 
-model AccesorioColor {
-  id          String    @id @default(uuid())
-  color       String
-
-  accesorioId String    @map("accesorio_id")
-  accesorio   Accesorio @relation(fields: [accesorioId], references: [id], onDelete: Cascade)
-
-  @@index([accesorioId])
-  @@map("accesorio_colores")
-}
-
-model AccesorioImagen {
+model PropiedadImagen {
   id          String    @id @default(uuid())
   url         String
   orden       Int       @default(0)
+  alt         String?
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  accesorioId String    @map("accesorio_id")
-  accesorio   Accesorio @relation(fields: [accesorioId], references: [id], onDelete: Cascade)
+  propiedadId String    @map("propiedad_id")
+  propiedad   Propiedad @relation(fields: [propiedadId], references: [id], onDelete: Cascade)
 
-  @@index([accesorioId])
-  @@map("accesorio_imagenes")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ACCESORIOS GENÉRICOS (sin marca, ej. cable USB-C)
-// ─────────────────────────────────────────────────────────────────────────────
-
-model SubAccesorio {
-  id             String   @id @default(uuid())
-  nombre         String
-  tipo           String
-  descripcion    String?
-  cantidad       Int      @default(0)
-  isActive       Boolean  @default(true) @map("is_active")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  organizationId String       @map("organization_id")
-  organization   Organization @relation(fields: [organizationId], references: [id])
-
-  puntoDeVentaId String       @map("punto_de_venta_id")
-  puntoDeVenta   PuntoDeVenta @relation(fields: [puntoDeVentaId], references: [id])
-
-  colores        SubAccesorioColor[]
-  imagenes       SubAccesorioImagen[]
-
-  @@index([organizationId])
-  @@index([puntoDeVentaId])
-  @@index([nombre])
-  @@index([tipo])
-  @@map("sub_accesorios")
-}
-
-model SubAccesorioColor {
-  id             String       @id @default(uuid())
-  color          String
-
-  subAccesorioId String       @map("sub_accesorio_id")
-  subAccesorio   SubAccesorio @relation(fields: [subAccesorioId], references: [id], onDelete: Cascade)
-
-  @@index([subAccesorioId])
-  @@map("sub_accesorio_colores")
-}
-
-model SubAccesorioImagen {
-  id             String       @id @default(uuid())
-  url            String
-  orden          Int          @default(0)
-  createdAt      DateTime     @default(now()) @map("created_at")
-
-  subAccesorioId String       @map("sub_accesorio_id")
-  subAccesorio   SubAccesorio @relation(fields: [subAccesorioId], references: [id], onDelete: Cascade)
-
-  @@index([subAccesorioId])
-  @@map("sub_accesorio_imagenes")
+  @@index([propiedadId])
+  @@map("propiedad_imagenes")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,19 +191,19 @@ model SubAccesorioImagen {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AuditLog {
-  id             String   @id @default(uuid())
-  action         String                         // ej: "accesorio.create"
-  entityType     String   @map("entity_type")   // ej: "Accesorio"
-  entityId       String?  @map("entity_id")
-  payload        Json     @default("{}")         // diff o datos relevantes
-  ipAddress      String?  @map("ip_address")
-  userAgent      String?  @map("user_agent")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id             String        @id @default(uuid())
+  action         String                           // ej: "propiedad.create"
+  entityType     String        @map("entity_type") // ej: "Propiedad"
+  entityId       String?       @map("entity_id")
+  payload        Json          @default("{}")
+  ipAddress      String?       @map("ip_address")
+  userAgent      String?       @map("user_agent")
+  createdAt      DateTime      @default(now()) @map("created_at")
 
-  userId         String?      @map("user_id")
-  user           User?        @relation(fields: [userId], references: [id])
+  userId         String?       @map("user_id")
+  user           User?         @relation(fields: [userId], references: [id])
 
-  organizationId String?      @map("organization_id")
+  organizationId String?       @map("organization_id")
   organization   Organization? @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId])

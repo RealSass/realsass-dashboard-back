@@ -1,40 +1,56 @@
 // src/auth/auth.controller.ts
 import {
-  Controller,
-  Post,
-  Get,
   Body,
+  Controller,
+  Get,
   HttpCode,
   HttpStatus,
-  Request,
+  Post,
+  Req,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { SyncAuthDto } from './dto/sync-auth.dto';
-import { Public } from '../common/decorators/public.decorator';
-import type { Request as ExpressRequest } from 'express';
 
+@ApiTags('auth')
+@ApiBearerAuth('firebase-jwt')
 @Controller('api/v1/auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   /**
    * POST /api/v1/auth/sync
-   * Público — el ID token de Firebase se valida en el guard a nivel global.
-   * El frontend llama este endpoint justo después del login de Firebase.
+   * Sincroniza usuario Firebase con la DB del dashboard
+   * y obtiene el perfil del Sistema 1 (real-back).
    */
   @Post('sync')
   @HttpCode(HttpStatus.OK)
-  sync(@Body() dto: SyncAuthDto) {
-    return this.authService.sync(dto);
+  @ApiOperation({ summary: 'Sincroniza usuario con DB local y Sistema 1' })
+  @ApiResponse({ status: 200, description: 'Usuario sincronizado' })
+  @ApiResponse({ status: 401, description: 'Token inválido' })
+  async sync(@Body() dto: SyncAuthDto, @Req() req: Request) {
+    // Extraer el token original para reusarlo en la llamada al Sistema 1
+    const token = req.headers.authorization?.split(' ')[1] ?? '';
+    const result = await this.authService.sync(dto, token);
+    return { success: true, data: result };
   }
 
   /**
    * GET /api/v1/auth/me
-   * Protegido por FirebaseAuthGuard (global).
+   * Retorna el perfil del usuario autenticado en el dashboard.
    */
   @Get('me')
-  me(@Request() req: ExpressRequest) {
+  @ApiOperation({ summary: 'Perfil del usuario autenticado' })
+  @ApiResponse({ status: 200, description: 'Perfil del usuario' })
+  async me(@Req() req: Request) {
     const firebaseUid = (req as any).user?.firebaseUid as string;
-    return this.authService.me(firebaseUid);
+    const user = await this.authService.me(firebaseUid);
+    return { success: true, data: user };
   }
 }
