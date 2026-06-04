@@ -1,13 +1,15 @@
 # =============================================================================
-# Dockerfile — real-back (NestJS)
+# Dockerfile — real-dashboard-back (NestJS)
 # node:22-alpine + pnpm@10.11.1
 # Multi-stage: deps → builder → runner
 #
-# El runner copia solo dist/ y node_modules de producción → imagen mínima.
-# Prisma genera el cliente en el stage builder y se copia al runner.
+# IMPORTANTE sobre NODE_ENV:
+#   - deps stage:    sin NODE_ENV → instala devDeps (@nestjs/cli, typescript, etc.)
+#   - builder stage: NODE_ENV=development → nest build puede usar los devDeps
+#   - runner stage:  NODE_ENV=production → solo ejecuta el dist compilado
 # =============================================================================
 
-# ── Stage 1: dependencias de producción ──────────────────────────────────────
+# ── Stage 1: instalar TODAS las dependencias (dev + prod) ────────────────────
 FROM node:22-alpine AS deps
 
 RUN corepack enable \
@@ -17,10 +19,10 @@ WORKDIR /app
 
 COPY package.json .npmrc* ./
 
-# Instalar TODAS las dependencias (dev incluidas, necesarias para el build)
+# Sin --production: instala devDependencies también (necesarias para compilar)
 RUN pnpm install --no-frozen-lockfile
 
-# ── Stage 2: compilar TypeScript ──────────────────────────────────────────────
+# ── Stage 2: compilar TypeScript con NestJS CLI ───────────────────────────────
 FROM node:22-alpine AS builder
 
 RUN corepack enable \
@@ -28,9 +30,9 @@ RUN corepack enable \
 
 WORKDIR /app
 
-# Variables de entorno necesarias en build-time
-# (Prisma necesita DATABASE_URL para generate si usa datasource env())
-ARG DATABASE_URL
+# Build args para Prisma (DATABASE_URL puede ser dummy en build-time
+# ya que solo se usa en runtime — prisma generate no necesita conectarse)
+ARG DATABASE_URL="postgresql://build:build@localhost:5432/build"
 ARG FIREBASE_PROJECT_ID
 ARG FIREBASE_CLIENT_EMAIL
 ARG FIREBASE_PRIVATE_KEY
@@ -39,16 +41,35 @@ ENV DATABASE_URL=$DATABASE_URL
 ENV FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID
 ENV FIREBASE_CLIENT_EMAIL=$FIREBASE_CLIENT_EMAIL
 ENV FIREBASE_PRIVATE_KEY=$FIREBASE_PRIVATE_KEY
-ENV NODE_ENV=production
+
+# NODE_ENV=development para que nest build use devDependencies (@nestjs/cli)
+ENV NODE_ENV=development
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generar cliente Prisma + compilar TypeScript
+# 1. Generar cliente Prisma
+# 2. Compilar TypeScript → emite a ./dist/main.js (nest-cli sourceRoot:src + outDir:./dist)
 RUN pnpm prisma generate \
  && pnpm run build
 
-# ── Stage 3: imagen de producción mínima ─────────────────────────────────────
+# Verificar que el build produjo el artefacto esperado
+RUN test -f dist/main.js || (echo "ERROR: dist/main.js no fue generado — revisar errores de nest build" && exit 1)
+
+# ── Stage 3: instalar solo dependencias de producción ────────────────────────
+FROM node:22-alpine AS prod-deps
+
+RUN corepack enable \
+ && corepack prepare pnpm@10.11.1 --activate
+
+WORKDIR /app
+
+COPY package.json .npmrc* ./
+
+# Solo producción — sin @nestjs/cli ni typescript
+RUN pnpm install --no-frozen-lockfile --prod
+
+# ── Stage 4: imagen de producción mínima ─────────────────────────────────────
 FROM node:22-alpine AS runner
 
 RUN apk add --no-cache dumb-init
@@ -60,16 +81,18 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs \
  && adduser  --system --uid 1001 nestjs
 
-# Copiar solo lo necesario para runtime
-COPY --from=builder --chown=nestjs:nodejs /app/dist           ./dist
-COPY --from=builder --chown=nestjs:nodejs /app/node_modules   ./node_modules
-COPY --from=builder --chown=nestjs:nodejs /app/prisma         ./prisma
-COPY --from=builder --chown=nestjs:nodejs /app/package.json   ./package.json
+# dist/ compilado desde el builder
+COPY --from=builder    --chown=nestjs:nodejs /app/dist         ./dist
+# node_modules de producción (sin devDeps) → imagen más pequeña
+COPY --from=prod-deps  --chown=nestjs:nodejs /app/node_modules ./node_modules
+# prisma/ necesario para que el cliente Prisma funcione en runtime
+COPY --from=builder    --chown=nestjs:nodejs /app/prisma       ./prisma
+COPY --from=builder    --chown=nestjs:nodejs /app/package.json ./package.json
 
 USER nestjs
 
 EXPOSE 3000
 ENV PORT=3000
 
-# dumb-init maneja señales correctamente (graceful shutdown)
-CMD ["dumb-init", "node", "dist/src/main"]
+# dist/main.js — ruta correcta para nest-cli con sourceRoot:src + outDir:./dist
+CMD ["dumb-init", "node", "dist/main"]
