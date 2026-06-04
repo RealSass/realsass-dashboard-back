@@ -72,4 +72,4 @@ EXPOSE 3000
 ENV PORT=3000
 
 # dumb-init maneja señales correctamente (graceful shutdown)
-CMD ["dumb-init", "node", "dist/main"]
+CMD ["dumb-init", "node", "dist/src/main"]
