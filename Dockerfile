@@ -81,11 +81,10 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs \
  && adduser  --system --uid 1001 nestjs
 
-# dist/ compilado desde el builder
+# Copiar node_modules del BUILDER (tiene @prisma/client generado)
+# NO usar prod-deps — prisma generate crea .prisma/client que prod-deps no tiene
 COPY --from=builder    --chown=nestjs:nodejs /app/dist         ./dist
-# node_modules de producción (sin devDeps) → imagen más pequeña
-COPY --from=prod-deps  --chown=nestjs:nodejs /app/node_modules ./node_modules
-# prisma/ necesario para que el cliente Prisma funcione en runtime
+COPY --from=builder    --chown=nestjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder    --chown=nestjs:nodejs /app/prisma       ./prisma
 COPY --from=builder    --chown=nestjs:nodejs /app/package.json ./package.json
 
@@ -94,5 +93,4 @@ USER nestjs
 EXPOSE 3000
 ENV PORT=3000
 
-# dist/main.js — ruta correcta para nest-cli con sourceRoot:src + outDir:./dist
 CMD ["dumb-init", "node", "dist/src/main"]
