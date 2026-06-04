@@ -1,0 +1,43 @@
+# Build output — se regenera en el stage builder
+dist
+build
+
+# Dependencies — se reinstalan en el stage deps
+node_modules
+.pnpm-store
+
+# Entornos locales — NUNCA al contenedor
+.env
+.env.local
+.env.*.local
+
+# Dev/test
+__tests__
+test
+*.test.ts
+*.spec.ts
+coverage
+jest.config.*
+
+# Git y CI
+.git
+.gitignore
+.github
+
+# Docker mismo
+Dockerfile*
+.dockerignore
+railway.json
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md
+README*
+CHANGELOG*
