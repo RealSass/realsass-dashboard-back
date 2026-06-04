@@ -54,7 +54,7 @@ RUN pnpm prisma generate \
  && pnpm run build
 
 # Verificar que el build produjo el artefacto esperado
-RUN test -f dist/main.js || (echo "ERROR: dist/main.js no fue generado — revisar errores de nest build" && exit 1)
+RUN test -f dist/src/main.js || (echo "ERROR: dist/src/main.js no fue generado" && exit 1)
 
 # ── Stage 3: instalar solo dependencias de producción ────────────────────────
 FROM node:22-alpine AS prod-deps
@@ -95,4 +95,4 @@ EXPOSE 3000
 ENV PORT=3000
 
 # dist/main.js — ruta correcta para nest-cli con sourceRoot:src + outDir:./dist
-CMD ["dumb-init", "node", "dist/main"]
+CMD ["dumb-init", "node", "dist/src/main"]
