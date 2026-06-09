@@ -28,7 +28,7 @@ import type { TenantContext } from '../tenant/tenant.interface';
 @ApiTags('zonas')
 @ApiBearerAuth('firebase-jwt')
 @UseGuards(TenantGuard)
-@Controller('api/v1/zonas')
+@Controller('zonas')
 export class ZonasController {
   constructor(private readonly zonasService: ZonasService) {}
 

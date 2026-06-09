@@ -14,7 +14,7 @@ import { FirebaseSsoDto } from './dto/firebase-sso.dto';
 import { Public } from '../common/decorators/public.decorator';
 import type { Request as ExpressRequest } from 'express';
 
-@Controller('api/v1/auth')
+@Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

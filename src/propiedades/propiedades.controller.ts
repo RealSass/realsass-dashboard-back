@@ -30,7 +30,7 @@ import type { TenantContext } from '../tenant/tenant.interface';
 @ApiTags('propiedades')
 @ApiBearerAuth('firebase-jwt')
 @UseGuards(TenantGuard)
-@Controller('api/v1/propiedades')
+@Controller('propiedades')
 export class PropiedadesController {
   constructor(private readonly propiedadesService: PropiedadesService) {}
 
