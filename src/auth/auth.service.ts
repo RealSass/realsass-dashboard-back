@@ -8,6 +8,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { JwtService } from '@nestjs/jwt';
+import { FIREBASE_ADMIN } from '../firebase/firebase.module';
+import type * as admin from 'firebase-admin';
+import { FirebaseSsoDto } from './dto/firebase-sso.dto';
+import { JwtService } from '@nestjs/jwt';
+import { FIREBASE_ADMIN } from '../firebase/firebase.module';
+import type * as admin from 'firebase-admin';
+import { FirebaseSsoDto } from './dto/firebase-sso.dto';
 import { SyncAuthDto } from './dto/sync-auth.dto';
 
 @Injectable()
@@ -18,6 +26,8 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly jwtService: JwtService,
+    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
     private readonly config: ConfigService,
   ) {
     this.realBackUrl = this.config.getOrThrow<string>('REAL_BACK_URL');
@@ -145,5 +155,97 @@ export class AuthService {
     }
 
     return user;
+  }
+
+  /**
+   * POST /api/v1/auth/firebase-sso
+   * Recibe Firebase ID token desde real-front, valida identidad,
+   * busca/crea usuario en la DB del dashboard y emite JWT del sistema.
+   */
+  async firebaseSso(dto: FirebaseSsoDto): Promise<{
+    accessToken:  string;
+    refreshToken: string;
+    user: { id: string; email: string; nombre: string; role: string };
+  }> {
+    if (!this.firebase) {
+      throw new UnauthorizedException('Firebase no configurado en este entorno');
+    }
+
+    // 1. Verificar token Firebase
+    let decoded: admin.auth.DecodedIdToken;
+    try {
+      decoded = await this.firebase.auth().verifyIdToken(dto.firebaseIdToken, true);
+    } catch (err) {
+      this.logger.warn(`SSO: token inválido — ${(err as Error).message}`);
+      throw new UnauthorizedException('Token de Firebase inválido o expirado');
+    }
+
+    const uid   = decoded.uid;
+    const email = decoded.email ?? '';
+
+    // 2. Buscar o crear usuario en la DB del dashboard
+    let user = await this.prisma.user.findFirst({
+      where: { OR: [{ firebaseUid: uid }, { email }] },
+      select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          firebaseUid:   uid,
+          firebaseEmail: email,
+          email,
+          nombre: decoded.name ?? email.split('@')[0] ?? 'Usuario',
+          role:   'AGENTE',
+        },
+        select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
+      });
+      this.logger.log(`SSO: nuevo usuario — ${email}`);
+    } else if (!user.firebaseUid) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data:  { firebaseUid: uid, firebaseEmail: email },
+      });
+    }
+
+    // 3. Verificar cuenta activa
+    if (!user.isActive) {
+      throw new ForbiddenException('Cuenta desactivada. Contactá al administrador.');
+    }
+
+    // 4. Emitir JWT del sistema dashboard
+    const payload = { sub: user.id, email: user.email, role: user.role };
+
+    const accessToken = this.jwtService.sign(payload, {
+      secret:    process.env['JWT_ACCESS_SECRET']      ?? 'change_me_access',
+      expiresIn: process.env['JWT_ACCESS_EXPIRES_IN']  ?? '15m',
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
+      expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
+    });
+
+    // 5. Persistir refresh token
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:  { refreshToken },
+    });
+
+    await this.audit.log({
+      action:     'auth.firebase_sso',
+      entityType: 'User',
+      entityId:   user.id,
+      userId:     user.id,
+      payload:    { email: user.email, role: user.role },
+    });
+
+    this.logger.log(`SSO exitoso — ${user.email} (${user.role})`);
+
+    return {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
+    };
   }
 }

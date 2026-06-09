@@ -17,6 +17,7 @@ import {
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { SyncAuthDto } from './dto/sync-auth.dto';
+import { FirebaseSsoDto } from './dto/firebase-sso.dto';
 
 @ApiTags('auth')
 @ApiBearerAuth('firebase-jwt')
@@ -52,5 +53,17 @@ export class AuthController {
     const firebaseUid = (req as any).user?.firebaseUid as string;
     const user = await this.authService.me(firebaseUid);
     return { success: true, data: user };
+  }
+
+  /**
+   * POST /api/v1/auth/firebase-sso
+   * Ruta pública. Recibe Firebase ID token de real-front y devuelve
+   * accessToken + refreshToken del sistema dashboard.
+   */
+  @Public()
+  @Post('firebase-sso')
+  @HttpCode(HttpStatus.OK)
+  firebaseSso(@Body() dto: FirebaseSsoDto) {
+    return this.authService.firebaseSso(dto);
   }
 }

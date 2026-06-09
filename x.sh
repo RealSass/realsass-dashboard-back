@@ -1,161 +1,257 @@
 #!/usr/bin/env bash
 # =============================================================================
-# fix-dockerfile-nestjs-build.sh
-#
-# Problema:  Cannot find module '/app/dist/main'
-#
-# Causas identificadas:
-#   1. NODE_ENV=production en el stage builder → pnpm no instala devDependencies
-#      → @nestjs/cli no disponible → nest build falla / no emite dist/
-#   2. CMD apuntaba a dist/src/main en lugar de dist/main
-#      (nest-cli sourceRoot:src + tsconfig outDir:./dist → emite a dist/main.js)
-#
-# Solución:
-#   - Reescribir Dockerfile con NODE_ENV correcto por stage
-#   - Stage deps: sin NODE_ENV (instala todo, dev incluido)
-#   - Stage builder: NODE_ENV=development para que nest build funcione
-#   - Stage runner: NODE_ENV=production
-#   - CMD: dumb-init node dist/main  (no dist/src/main)
-#
-# USO:
-#   chmod +x fix-dockerfile-nestjs-build.sh
-#   ./fix-dockerfile-nestjs-build.sh
+# 1-dashboard-back.sh
+# Agrega POST /api/v1/auth/firebase-sso al dashboard-back.
+# USO: cd <raiz-de-dashboard-back> && bash 1-dashboard-back.sh
 # =============================================================================
+set -euo pipefail
 
-set -e
-set -o pipefail
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}  ✓  $*${NC}"; }
+warn() { echo -e "${YELLOW}  ⚠  $*${NC}"; }
+fail() { echo -e "${RED}  ✗  $*${NC}"; exit 1; }
+step() { echo -e "\n${BLUE}── $* ──────────────────────────────${NC}"; }
 
-GREEN='\033[0;32m'; BLUE='\033[0;34m'; RED='\033[0;31m'; NC='\033[0m'
-ok()  { echo -e "${GREEN}[OK]${NC}    $1"; }
-log() { echo -e "${BLUE}[INFO]${NC}  $1"; }
-err() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+echo -e "${BLUE}"
+echo "╔══════════════════════════════════════════╗"
+echo "║  dashboard-back — Firebase SSO endpoint  ║"
+echo "╚══════════════════════════════════════════╝"
+echo -e "${NC}"
 
-[ -f "package.json" ]                    || err "Correr desde la raíz del proyecto"
-grep -q '"@nestjs/core"' package.json    || err "No parece ser un proyecto NestJS"
+[[ -f "package.json" ]]                || fail "Corré desde la raíz de dashboard-back"
+[[ -f "src/auth/auth.service.ts" ]]    || fail "No encontré src/auth/auth.service.ts"
+[[ -f "src/auth/auth.controller.ts" ]] || fail "No encontré src/auth/auth.controller.ts"
+[[ -f "src/auth/auth.module.ts" ]]     || fail "No encontré src/auth/auth.module.ts"
 
-log "Sobreescribiendo Dockerfile..."
+# ─── 1. DTO ──────────────────────────────────────────────────────────────────
+step "1/4  src/auth/dto/firebase-sso.dto.ts"
 
-cat > Dockerfile << 'DOCKERFILE'
-# =============================================================================
-# Dockerfile — real-dashboard-back (NestJS)
-# node:22-alpine + pnpm@10.11.1
-# Multi-stage: deps → builder → runner
-#
-# IMPORTANTE sobre NODE_ENV:
-#   - deps stage:    sin NODE_ENV → instala devDeps (@nestjs/cli, typescript, etc.)
-#   - builder stage: NODE_ENV=development → nest build puede usar los devDeps
-#   - runner stage:  NODE_ENV=production → solo ejecuta el dist compilado
-# =============================================================================
+cat > src/auth/dto/firebase-sso.dto.ts << 'EOF'
+// src/auth/dto/firebase-sso.dto.ts
+import { IsString, IsNotEmpty } from 'class-validator';
 
-# ── Stage 1: instalar TODAS las dependencias (dev + prod) ────────────────────
-FROM node:22-alpine AS deps
+export class FirebaseSsoDto {
+  /** Firebase ID token obtenido con firebaseUser.getIdToken() */
+  @IsString()
+  @IsNotEmpty()
+  firebaseIdToken: string;
+}
+EOF
+ok "src/auth/dto/firebase-sso.dto.ts"
 
-RUN corepack enable \
- && corepack prepare pnpm@10.11.1 --activate
+# ─── 2. auth.service.ts ──────────────────────────────────────────────────────
+step "2/4  src/auth/auth.service.ts"
 
-WORKDIR /app
+if grep -q "firebaseSso" src/auth/auth.service.ts; then
+  warn "firebaseSso ya existe — saltando"
+else
+  # 2a. Reemplazar imports de @nestjs/common (sin | en el contenido — sed funciona)
+  sed -i "s|import { Injectable, NotFoundException, Logger } from '@nestjs/common';|import { Injectable, NotFoundException, UnauthorizedException, ForbiddenException, Inject, Logger } from '@nestjs/common';|" \
+    src/auth/auth.service.ts
 
-COPY package.json .npmrc* ./
+  # 2b. Agregar imports de Jwt + Firebase + DTO después de AuditService (sin | — sed funciona)
+  sed -i "s|import { AuditService } from '../audit/audit.service';|import { AuditService } from '../audit/audit.service';\nimport { JwtService } from '@nestjs/jwt';\nimport { FIREBASE_ADMIN } from '../firebase/firebase.module';\nimport type * as admin from 'firebase-admin';\nimport { FirebaseSsoDto } from './dto/firebase-sso.dto';|" \
+    src/auth/auth.service.ts
 
-# Sin --production: instala devDependencies también (necesarias para compilar)
-RUN pnpm install --no-frozen-lockfile
+  # 2c. Extender constructor — usa awk porque "App | null" contiene |
+  awk '
+  /private readonly audit: AuditService,$/ {
+    print
+    print "    private readonly jwtService: JwtService,"
+    print "    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,"
+    next
+  }
+  { print }
+  ' src/auth/auth.service.ts > /tmp/auth_service_tmp.ts
+  mv /tmp/auth_service_tmp.ts src/auth/auth.service.ts
 
-# ── Stage 2: compilar TypeScript con NestJS CLI ───────────────────────────────
-FROM node:22-alpine AS builder
+  # 2d. Agregar método firebaseSso antes del último "}"
+  TMPFILE=$(mktemp)
+  head -n -1 src/auth/auth.service.ts > "$TMPFILE"
 
-RUN corepack enable \
- && corepack prepare pnpm@10.11.1 --activate
+  cat >> "$TMPFILE" << 'ENDMETHOD'
 
-WORKDIR /app
+  /**
+   * POST /api/v1/auth/firebase-sso
+   * Recibe Firebase ID token desde real-front, valida identidad,
+   * busca/crea usuario en la DB del dashboard y emite JWT del sistema.
+   */
+  async firebaseSso(dto: FirebaseSsoDto): Promise<{
+    accessToken:  string;
+    refreshToken: string;
+    user: { id: string; email: string; nombre: string; role: string };
+  }> {
+    if (!this.firebase) {
+      throw new UnauthorizedException('Firebase no configurado en este entorno');
+    }
 
-# Build args para Prisma (DATABASE_URL puede ser dummy en build-time
-# ya que solo se usa en runtime — prisma generate no necesita conectarse)
-ARG DATABASE_URL="postgresql://build:build@localhost:5432/build"
-ARG FIREBASE_PROJECT_ID
-ARG FIREBASE_CLIENT_EMAIL
-ARG FIREBASE_PRIVATE_KEY
+    // 1. Verificar token Firebase
+    let decoded: admin.auth.DecodedIdToken;
+    try {
+      decoded = await this.firebase.auth().verifyIdToken(dto.firebaseIdToken, true);
+    } catch (err) {
+      this.logger.warn(`SSO: token inválido — ${(err as Error).message}`);
+      throw new UnauthorizedException('Token de Firebase inválido o expirado');
+    }
 
-ENV DATABASE_URL=$DATABASE_URL
-ENV FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID
-ENV FIREBASE_CLIENT_EMAIL=$FIREBASE_CLIENT_EMAIL
-ENV FIREBASE_PRIVATE_KEY=$FIREBASE_PRIVATE_KEY
+    const uid   = decoded.uid;
+    const email = decoded.email ?? '';
 
-# NODE_ENV=development para que nest build use devDependencies (@nestjs/cli)
-ENV NODE_ENV=development
+    // 2. Buscar o crear usuario en la DB del dashboard
+    let user = await this.prisma.user.findFirst({
+      where: { OR: [{ firebaseUid: uid }, { email }] },
+      select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
+    });
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          firebaseUid:   uid,
+          firebaseEmail: email,
+          email,
+          nombre: decoded.name ?? email.split('@')[0] ?? 'Usuario',
+          role:   'AGENTE',
+        },
+        select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
+      });
+      this.logger.log(`SSO: nuevo usuario — ${email}`);
+    } else if (!user.firebaseUid) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data:  { firebaseUid: uid, firebaseEmail: email },
+      });
+    }
 
-# 1. Generar cliente Prisma
-# 2. Compilar TypeScript → emite a ./dist/main.js (nest-cli sourceRoot:src + outDir:./dist)
-RUN pnpm prisma generate \
- && pnpm run build
+    // 3. Verificar cuenta activa
+    if (!user.isActive) {
+      throw new ForbiddenException('Cuenta desactivada. Contactá al administrador.');
+    }
 
-# Verificar que el build produjo el artefacto esperado
-RUN test -f dist/main.js || (echo "ERROR: dist/main.js no fue generado — revisar errores de nest build" && exit 1)
+    // 4. Emitir JWT del sistema dashboard
+    const payload = { sub: user.id, email: user.email, role: user.role };
 
-# ── Stage 3: instalar solo dependencias de producción ────────────────────────
-FROM node:22-alpine AS prod-deps
+    const accessToken = this.jwtService.sign(payload, {
+      secret:    process.env['JWT_ACCESS_SECRET']      ?? 'change_me_access',
+      expiresIn: process.env['JWT_ACCESS_EXPIRES_IN']  ?? '15m',
+    });
 
-RUN corepack enable \
- && corepack prepare pnpm@10.11.1 --activate
+    const refreshToken = this.jwtService.sign(payload, {
+      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
+      expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
+    });
 
-WORKDIR /app
+    // 5. Persistir refresh token
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:  { refreshToken },
+    });
 
-COPY package.json .npmrc* ./
+    await this.audit.log({
+      action:     'auth.firebase_sso',
+      entityType: 'User',
+      entityId:   user.id,
+      userId:     user.id,
+      payload:    { email: user.email, role: user.role },
+    });
 
-# Solo producción — sin @nestjs/cli ni typescript
-RUN pnpm install --no-frozen-lockfile --prod
+    this.logger.log(`SSO exitoso — ${user.email} (${user.role})`);
 
-# ── Stage 4: imagen de producción mínima ─────────────────────────────────────
-FROM node:22-alpine AS runner
+    return {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
+    };
+  }
+}
+ENDMETHOD
 
-RUN apk add --no-cache dumb-init
+  mv "$TMPFILE" src/auth/auth.service.ts
+  ok "src/auth/auth.service.ts — firebaseSso() agregado"
+fi
 
-WORKDIR /app
+# ─── 3. auth.controller.ts ───────────────────────────────────────────────────
+step "3/4  src/auth/auth.controller.ts"
 
-ENV NODE_ENV=production
+if grep -q "firebase-sso" src/auth/auth.controller.ts; then
+  warn "Endpoint ya existe — saltando"
+else
+  # Agregar import del DTO (sin | — sed funciona)
+  sed -i "s|import { SyncAuthDto } from './dto/sync-auth.dto';|import { SyncAuthDto } from './dto/sync-auth.dto';\nimport { FirebaseSsoDto } from './dto/firebase-sso.dto';|" \
+    src/auth/auth.controller.ts
 
-RUN addgroup --system --gid 1001 nodejs \
- && adduser  --system --uid 1001 nestjs
+  # Agregar endpoint antes del último "}"
+  TMPFILE=$(mktemp)
+  head -n -1 src/auth/auth.controller.ts > "$TMPFILE"
 
-# dist/ compilado desde el builder
-COPY --from=builder    --chown=nestjs:nodejs /app/dist         ./dist
-# node_modules de producción (sin devDeps) → imagen más pequeña
-COPY --from=prod-deps  --chown=nestjs:nodejs /app/node_modules ./node_modules
-# prisma/ necesario para que el cliente Prisma funcione en runtime
-COPY --from=builder    --chown=nestjs:nodejs /app/prisma       ./prisma
-COPY --from=builder    --chown=nestjs:nodejs /app/package.json ./package.json
+  cat >> "$TMPFILE" << 'ENDMETHOD'
 
-USER nestjs
+  /**
+   * POST /api/v1/auth/firebase-sso
+   * Ruta pública. Recibe Firebase ID token de real-front y devuelve
+   * accessToken + refreshToken del sistema dashboard.
+   */
+  @Public()
+  @Post('firebase-sso')
+  @HttpCode(HttpStatus.OK)
+  firebaseSso(@Body() dto: FirebaseSsoDto) {
+    return this.authService.firebaseSso(dto);
+  }
+}
+ENDMETHOD
 
-EXPOSE 3000
-ENV PORT=3000
+  mv "$TMPFILE" src/auth/auth.controller.ts
+  ok "src/auth/auth.controller.ts — POST firebase-sso agregado"
+fi
 
-# dist/main.js — ruta correcta para nest-cli con sourceRoot:src + outDir:./dist
-CMD ["dumb-init", "node", "dist/main"]
-DOCKERFILE
+# ─── 4. auth.module.ts ───────────────────────────────────────────────────────
+step "4/4  src/auth/auth.module.ts"
 
-ok "Dockerfile reescrito"
+if grep -q "JwtModule" src/auth/auth.module.ts; then
+  warn "JwtModule ya registrado — saltando"
+else
+  cat > src/auth/auth.module.ts << 'EOF'
+// src/auth/auth.module.ts
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { AuditModule } from '../audit/audit.module';
 
-# Actualizar railway.json con el CMD correcto
-if [ -f "railway.json" ]; then
-  log "Actualizando startCommand en railway.json..."
-  # Reemplazar cualquier variante del startCommand
-  sed -i 's|"startCommand": ".*dist.*main.*"|"startCommand": "node dist/main"|' railway.json
-  ok "railway.json actualizado"
+@Module({
+  imports: [
+    AuditModule,
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports:    [ConfigModule],
+      inject:     [ConfigService],
+      useFactory: (cs: ConfigService) => ({
+        secret:      cs.get<string>('JWT_ACCESS_SECRET', 'change_me_access'),
+        signOptions: { expiresIn: cs.get<string>('JWT_ACCESS_EXPIRES_IN', '15m') },
+      }),
+    }),
+  ],
+  controllers: [AuthController],
+  providers:   [AuthService],
+  exports:     [AuthService],
+})
+export class AuthModule {}
+EOF
+  ok "src/auth/auth.module.ts — JwtModule registrado"
+fi
+
+# ─── Verificar .env ───────────────────────────────────────────────────────────
+echo ""
+if [[ -f ".env" ]]; then
+  grep -q "JWT_ACCESS_SECRET"   .env && ok  ".env JWT_ACCESS_SECRET ✓"   || warn ".env — falta JWT_ACCESS_SECRET"
+  grep -q "JWT_REFRESH_SECRET"  .env && ok  ".env JWT_REFRESH_SECRET ✓"  || warn ".env — falta JWT_REFRESH_SECRET"
+  grep -q "FIREBASE_PROJECT_ID" .env && ok  ".env FIREBASE_PROJECT_ID ✓" || warn ".env — falta FIREBASE_PROJECT_ID"
 fi
 
 echo ""
-echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Fix completado${NC}"
-echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
-echo ""
-echo -e "  CMD correcto: ${GREEN}node dist/main${NC}"
-echo -e "  (nest-cli sourceRoot:src + tsconfig outDir:./dist → dist/main.js)"
-echo ""
-echo -e "${BLUE}Próximos pasos:${NC}"
-echo -e "  git add Dockerfile railway.json"
-echo -e "  git commit -m 'fix: Dockerfile NODE_ENV stages + correct dist/main path'"
-echo -e "  git push"
+echo -e "${GREEN}══ dashboard-back listo ══════════════════════════════════════${NC}"
+echo "  Endpoint: POST /api/v1/auth/firebase-sso"
+echo "  Body:     { \"firebaseIdToken\": \"<token>\" }"
+echo "  Response: { \"data\": { accessToken, refreshToken, user } }"
+echo "  → pnpm start:dev"
 echo ""
