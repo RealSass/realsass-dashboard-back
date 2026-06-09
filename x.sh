@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 1-dashboard-back.sh
-# Agrega POST /api/v1/auth/firebase-sso al dashboard-back.
+# 1-dashboard-back.sh  —  reescribe archivos completos, sin sed ni awk
 # USO: cd <raiz-de-dashboard-back> && bash 1-dashboard-back.sh
 # =============================================================================
 set -euo pipefail
-
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}  ✓  $*${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠  $*${NC}"; }
@@ -23,53 +21,124 @@ echo -e "${NC}"
 [[ -f "src/auth/auth.controller.ts" ]] || fail "No encontré src/auth/auth.controller.ts"
 [[ -f "src/auth/auth.module.ts" ]]     || fail "No encontré src/auth/auth.module.ts"
 
-# ─── 1. DTO ──────────────────────────────────────────────────────────────────
-step "1/4  src/auth/dto/firebase-sso.dto.ts"
+# ─── 1. Instalar @nestjs/jwt si no está ──────────────────────────────────────
+step "1/5  Dependencias"
+if grep -q '"@nestjs/jwt"' package.json; then
+  ok "@nestjs/jwt ya está en package.json"
+else
+  pnpm add @nestjs/jwt
+  ok "@nestjs/jwt instalado"
+fi
 
+# ─── 2. DTO ──────────────────────────────────────────────────────────────────
+step "2/5  src/auth/dto/firebase-sso.dto.ts"
 cat > src/auth/dto/firebase-sso.dto.ts << 'EOF'
 // src/auth/dto/firebase-sso.dto.ts
 import { IsString, IsNotEmpty } from 'class-validator';
 
 export class FirebaseSsoDto {
-  /** Firebase ID token obtenido con firebaseUser.getIdToken() */
   @IsString()
   @IsNotEmpty()
   firebaseIdToken: string;
 }
 EOF
-ok "src/auth/dto/firebase-sso.dto.ts"
+ok "firebase-sso.dto.ts"
 
-# ─── 2. auth.service.ts ──────────────────────────────────────────────────────
-step "2/4  src/auth/auth.service.ts"
+# ─── 3. auth.service.ts  (reescritura completa) ───────────────────────────────
+step "3/5  src/auth/auth.service.ts"
+cat > src/auth/auth.service.ts << 'EOF'
+// src/auth/auth.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+  ForbiddenException,
+  Inject,
+  Logger,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { FIREBASE_ADMIN } from '../firebase/firebase.module';
+import type * as admin from 'firebase-admin';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { FirebaseSsoDto } from './dto/firebase-sso.dto';
 
-if grep -q "firebaseSso" src/auth/auth.service.ts; then
-  warn "firebaseSso ya existe — saltando"
-else
-  # 2a. Reemplazar imports de @nestjs/common (sin | en el contenido — sed funciona)
-  sed -i "s|import { Injectable, NotFoundException, Logger } from '@nestjs/common';|import { Injectable, NotFoundException, UnauthorizedException, ForbiddenException, Inject, Logger } from '@nestjs/common';|" \
-    src/auth/auth.service.ts
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
 
-  # 2b. Agregar imports de Jwt + Firebase + DTO después de AuditService (sin | — sed funciona)
-  sed -i "s|import { AuditService } from '../audit/audit.service';|import { AuditService } from '../audit/audit.service';\nimport { JwtService } from '@nestjs/jwt';\nimport { FIREBASE_ADMIN } from '../firebase/firebase.module';\nimport type * as admin from 'firebase-admin';\nimport { FirebaseSsoDto } from './dto/firebase-sso.dto';|" \
-    src/auth/auth.service.ts
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly jwtService: JwtService,
+    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
+  ) {}
 
-  # 2c. Extender constructor — usa awk porque "App | null" contiene |
-  awk '
-  /private readonly audit: AuditService,$/ {
-    print
-    print "    private readonly jwtService: JwtService,"
-    print "    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,"
-    next
+  /**
+   * POST /api/v1/auth/sync
+   * Upsert del usuario en base al firebaseUid.
+   */
+  async sync(dto: SyncAuthDto) {
+    const user = await this.prisma.user.upsert({
+      where: { firebaseUid: dto.firebaseUid },
+      create: {
+        firebaseUid:   dto.firebaseUid,
+        firebaseEmail: dto.email,
+        email:         dto.email,
+        nombre:        dto.nombre ?? dto.email.split('@')[0],
+        role:          'AGENTE',
+      },
+      update: {
+        firebaseEmail: dto.email,
+        email:         dto.email,
+        ...(dto.nombre && { nombre: dto.nombre }),
+      },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
+    });
+
+    await this.audit.log({
+      action:     'auth.sync',
+      entityType: 'User',
+      entityId:   user.id,
+      userId:     user.id,
+      payload:    { email: dto.email },
+    });
+
+    return user;
   }
-  { print }
-  ' src/auth/auth.service.ts > /tmp/auth_service_tmp.ts
-  mv /tmp/auth_service_tmp.ts src/auth/auth.service.ts
 
-  # 2d. Agregar método firebaseSso antes del último "}"
-  TMPFILE=$(mktemp)
-  head -n -1 src/auth/auth.service.ts > "$TMPFILE"
+  /**
+   * GET /api/v1/auth/me
+   */
+  async me(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { firebaseUid },
+      select: {
+        id:          true,
+        email:       true,
+        nombre:      true,
+        role:        true,
+        firebaseUid: true,
+        isActive:    true,
+        createdAt:   true,
+      },
+    });
 
-  cat >> "$TMPFILE" << 'ENDMETHOD'
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado. Llamar a /auth/sync primero.');
+    }
+
+    return user;
+  }
 
   /**
    * POST /api/v1/auth/firebase-sso
@@ -90,14 +159,14 @@ else
     try {
       decoded = await this.firebase.auth().verifyIdToken(dto.firebaseIdToken, true);
     } catch (err) {
-      this.logger.warn(`SSO: token inválido — ${(err as Error).message}`);
+      this.logger.warn(`SSO token inválido: ${(err as Error).message}`);
       throw new UnauthorizedException('Token de Firebase inválido o expirado');
     }
 
     const uid   = decoded.uid;
     const email = decoded.email ?? '';
 
-    // 2. Buscar o crear usuario en la DB del dashboard
+    // 2. Buscar o crear usuario
     let user = await this.prisma.user.findFirst({
       where: { OR: [{ firebaseUid: uid }, { email }] },
       select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
@@ -114,7 +183,7 @@ else
         },
         select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
       });
-      this.logger.log(`SSO: nuevo usuario — ${email}`);
+      this.logger.log(`SSO: nuevo usuario creado — ${email}`);
     } else if (!user.firebaseUid) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -127,12 +196,12 @@ else
       throw new ForbiddenException('Cuenta desactivada. Contactá al administrador.');
     }
 
-    // 4. Emitir JWT del sistema dashboard
+    // 4. Emitir JWT
     const payload = { sub: user.id, email: user.email, role: user.role };
 
     const accessToken = this.jwtService.sign(payload, {
-      secret:    process.env['JWT_ACCESS_SECRET']      ?? 'change_me_access',
-      expiresIn: process.env['JWT_ACCESS_EXPIRES_IN']  ?? '15m',
+      secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
+      expiresIn: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m',
     });
 
     const refreshToken = this.jwtService.sign(payload, {
@@ -163,32 +232,50 @@ else
     };
   }
 }
-ENDMETHOD
+EOF
+ok "auth.service.ts"
 
-  mv "$TMPFILE" src/auth/auth.service.ts
-  ok "src/auth/auth.service.ts — firebaseSso() agregado"
-fi
+# ─── 4. auth.controller.ts  (reescritura completa) ───────────────────────────
+step "4/5  src/auth/auth.controller.ts"
+cat > src/auth/auth.controller.ts << 'EOF'
+// src/auth/auth.controller.ts
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Request,
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { FirebaseSsoDto } from './dto/firebase-sso.dto';
+import { Public } from '../common/decorators/public.decorator';
+import type { Request as ExpressRequest } from 'express';
 
-# ─── 3. auth.controller.ts ───────────────────────────────────────────────────
-step "3/4  src/auth/auth.controller.ts"
+@Controller('api/v1/auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
 
-if grep -q "firebase-sso" src/auth/auth.controller.ts; then
-  warn "Endpoint ya existe — saltando"
-else
-  # Agregar import del DTO (sin | — sed funciona)
-  sed -i "s|import { SyncAuthDto } from './dto/sync-auth.dto';|import { SyncAuthDto } from './dto/sync-auth.dto';\nimport { FirebaseSsoDto } from './dto/firebase-sso.dto';|" \
-    src/auth/auth.controller.ts
+  /** POST /api/v1/auth/sync */
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  sync(@Body() dto: SyncAuthDto) {
+    return this.authService.sync(dto);
+  }
 
-  # Agregar endpoint antes del último "}"
-  TMPFILE=$(mktemp)
-  head -n -1 src/auth/auth.controller.ts > "$TMPFILE"
-
-  cat >> "$TMPFILE" << 'ENDMETHOD'
+  /** GET /api/v1/auth/me */
+  @Get('me')
+  me(@Request() req: ExpressRequest) {
+    const firebaseUid = (req as any).user?.firebaseUid as string;
+    return this.authService.me(firebaseUid);
+  }
 
   /**
    * POST /api/v1/auth/firebase-sso
-   * Ruta pública. Recibe Firebase ID token de real-front y devuelve
-   * accessToken + refreshToken del sistema dashboard.
+   * Ruta pública. Recibe Firebase ID token de real-front
+   * y devuelve accessToken + refreshToken del dashboard.
    */
   @Public()
   @Post('firebase-sso')
@@ -197,19 +284,12 @@ else
     return this.authService.firebaseSso(dto);
   }
 }
-ENDMETHOD
+EOF
+ok "auth.controller.ts"
 
-  mv "$TMPFILE" src/auth/auth.controller.ts
-  ok "src/auth/auth.controller.ts — POST firebase-sso agregado"
-fi
-
-# ─── 4. auth.module.ts ───────────────────────────────────────────────────────
-step "4/4  src/auth/auth.module.ts"
-
-if grep -q "JwtModule" src/auth/auth.module.ts; then
-  warn "JwtModule ya registrado — saltando"
-else
-  cat > src/auth/auth.module.ts << 'EOF'
+# ─── 5. auth.module.ts  (reescritura completa) ───────────────────────────────
+step "5/5  src/auth/auth.module.ts"
+cat > src/auth/auth.module.ts << 'EOF'
 // src/auth/auth.module.ts
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
@@ -237,21 +317,16 @@ import { AuditModule } from '../audit/audit.module';
 })
 export class AuthModule {}
 EOF
-  ok "src/auth/auth.module.ts — JwtModule registrado"
-fi
-
-# ─── Verificar .env ───────────────────────────────────────────────────────────
-echo ""
-if [[ -f ".env" ]]; then
-  grep -q "JWT_ACCESS_SECRET"   .env && ok  ".env JWT_ACCESS_SECRET ✓"   || warn ".env — falta JWT_ACCESS_SECRET"
-  grep -q "JWT_REFRESH_SECRET"  .env && ok  ".env JWT_REFRESH_SECRET ✓"  || warn ".env — falta JWT_REFRESH_SECRET"
-  grep -q "FIREBASE_PROJECT_ID" .env && ok  ".env FIREBASE_PROJECT_ID ✓" || warn ".env — falta FIREBASE_PROJECT_ID"
-fi
+ok "auth.module.ts"
 
 echo ""
 echo -e "${GREEN}══ dashboard-back listo ══════════════════════════════════════${NC}"
-echo "  Endpoint: POST /api/v1/auth/firebase-sso"
-echo "  Body:     { \"firebaseIdToken\": \"<token>\" }"
-echo "  Response: { \"data\": { accessToken, refreshToken, user } }"
+echo "  Archivos reescritos:"
+echo "    src/auth/dto/firebase-sso.dto.ts"
+echo "    src/auth/auth.service.ts"
+echo "    src/auth/auth.controller.ts"
+echo "    src/auth/auth.module.ts"
+echo ""
 echo "  → pnpm start:dev"
+echo "  → POST /api/v1/auth/firebase-sso  { firebaseIdToken: string }"
 echo ""
