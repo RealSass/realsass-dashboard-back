@@ -2,8 +2,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -14,63 +12,43 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  // Seguridad HTTP
-  app.use(helmet());
+  // Prefijo global — todos los endpoints quedan bajo /api/v1/...
+  app.setGlobalPrefix('api/v1');
 
-  // CORS — permite headers del ecosistema SSO
-  const allowedOrigins = configService
-    .get<string>('ALLOWED_ORIGINS', 'http://localhost:3002')
-    .split(',')
-    .map((o) => o.trim());
-
+  // CORS
   app.enableCors({
-    origin:         allowedOrigins,
-    methods:        ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-organization-id'],
-    credentials:    true,
+    origin: '*',
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-organization-id',
+    ],
+    credentials: false,
   });
 
-  // Pipes
+  // Global pipes
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist:            true,
-      forbidNonWhitelisted: true,
-      transform:            true,
-      transformOptions:     { enableImplicitConversion: true },
+      whitelist:              true,
+      forbidNonWhitelisted:   true,
+      transform:              true,
+      transformOptions:       { enableImplicitConversion: true },
     }),
   );
 
-  // Filters e interceptors
+  // Global filters
   app.useGlobalFilters(new HttpExceptionFilter());
+
+  // Global interceptors
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  // Swagger (solo en non-production)
-  if (configService.get('NODE_ENV') !== 'production') {
-    const config = new DocumentBuilder()
-      .setTitle('Real Estate Dashboard API')
-      .setDescription('Sistema 2 — Dashboard de gestión para inmobiliarias')
-      .setVersion('1.0')
-      .addBearerAuth(
-        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-        'firebase-jwt',
-      )
-      .build();
-    const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api/docs', app, document, {
-      swaggerOptions: { persistAuthorization: true },
-    });
-  }
-
-  const port = configService.get<number>('PORT', 3001);
+  const port = configService.get<number>('PORT', 3000);
   await app.listen(port);
 
-  logger.log(`🚀 Real Estate Dashboard API: http://localhost:${port}`);
+  logger.log(`🚀 Dashboard API corriendo en: http://localhost:${port}`);
   logger.log(`🔥 Firebase Auth SSO activo`);
-  logger.log(`🏢 Multi-tenant (x-organization-id)`);
-  logger.log(`🔗 Sistema 1 URL: ${configService.get('REAL_BACK_URL')}`);
-  if (configService.get('NODE_ENV') !== 'production') {
-    logger.log(`📄 Swagger docs: http://localhost:${port}/api/docs`);
-  }
+  logger.log(`📡 Prefix: /api/v1`);
 }
 
 bootstrap();
