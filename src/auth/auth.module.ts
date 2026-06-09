@@ -15,7 +15,10 @@ import { AuditModule } from '../audit/audit.module';
       inject:     [ConfigService],
       useFactory: (cs: ConfigService) => ({
         secret:      cs.get<string>('JWT_ACCESS_SECRET', 'change_me_access'),
-        signOptions: { expiresIn: cs.get<string>('JWT_ACCESS_EXPIRES_IN', '15m') },
+        signOptions: {
+          // cast necesario: @nestjs/jwt v11 exige StringValue, no string genérico
+          expiresIn: (cs.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')) as any,
+        },
       }),
     }),
   ],

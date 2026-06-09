@@ -26,10 +26,7 @@ export class AuthService {
     @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
   ) {}
 
-  /**
-   * POST /api/v1/auth/sync
-   * Upsert del usuario en base al firebaseUid.
-   */
+  /** POST /api/v1/auth/sync */
   async sync(dto: SyncAuthDto) {
     const user = await this.prisma.user.upsert({
       where: { firebaseUid: dto.firebaseUid },
@@ -46,13 +43,8 @@ export class AuthService {
         ...(dto.nombre && { nombre: dto.nombre }),
       },
       select: {
-        id:          true,
-        email:       true,
-        nombre:      true,
-        role:        true,
-        firebaseUid: true,
-        isActive:    true,
-        createdAt:   true,
+        id: true, email: true, nombre: true, role: true,
+        firebaseUid: true, isActive: true, createdAt: true,
       },
     });
 
@@ -67,20 +59,13 @@ export class AuthService {
     return user;
   }
 
-  /**
-   * GET /api/v1/auth/me
-   */
+  /** GET /api/v1/auth/me */
   async me(firebaseUid: string) {
     const user = await this.prisma.user.findUnique({
-      where: { firebaseUid },
+      where:  { firebaseUid },
       select: {
-        id:          true,
-        email:       true,
-        nombre:      true,
-        role:        true,
-        firebaseUid: true,
-        isActive:    true,
-        createdAt:   true,
+        id: true, email: true, nombre: true, role: true,
+        firebaseUid: true, isActive: true, createdAt: true,
       },
     });
 
@@ -91,11 +76,7 @@ export class AuthService {
     return user;
   }
 
-  /**
-   * POST /api/v1/auth/firebase-sso
-   * Recibe Firebase ID token desde real-front, valida identidad,
-   * busca/crea usuario en la DB del dashboard y emite JWT del sistema.
-   */
+  /** POST /api/v1/auth/firebase-sso */
   async firebaseSso(dto: FirebaseSsoDto): Promise<{
     accessToken:  string;
     refreshToken: string;
@@ -119,7 +100,7 @@ export class AuthService {
 
     // 2. Buscar o crear usuario
     let user = await this.prisma.user.findFirst({
-      where: { OR: [{ firebaseUid: uid }, { email }] },
+      where:  { OR: [{ firebaseUid: uid }, { email }] },
       select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
     });
 
@@ -134,7 +115,7 @@ export class AuthService {
         },
         select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
       });
-      this.logger.log(`SSO: nuevo usuario creado — ${email}`);
+      this.logger.log(`SSO: nuevo usuario — ${email}`);
     } else if (!user.firebaseUid) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -148,16 +129,18 @@ export class AuthService {
     }
 
     // 4. Emitir JWT
+    // "as any" necesario: @nestjs/jwt v11 exige StringValue en expiresIn,
+    // pero process.env devuelve string genérico — en runtime el valor es correcto.
     const payload = { sub: user.id, email: user.email, role: user.role };
 
     const accessToken = this.jwtService.sign(payload, {
       secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
-      expiresIn: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m',
+      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
     });
 
     const refreshToken = this.jwtService.sign(payload, {
       secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
-      expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
+      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
     });
 
     // 5. Persistir refresh token

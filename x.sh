@@ -1,51 +1,59 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 1-dashboard-back.sh  —  reescribe archivos completos, sin sed ni awk
-# USO: cd <raiz-de-dashboard-back> && bash 1-dashboard-back.sh
+# fix-dashboard-back.sh
+# Corrige el error de tipos de expiresIn en @nestjs/jwt v11
+# USO: cd <raiz-de-dashboard-back> && bash fix-dashboard-back.sh
 # =============================================================================
 set -euo pipefail
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; NC='\033[0m'
+GREEN='\033[0;32m'; BLUE='\033[0;34m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}  ✓  $*${NC}"; }
-warn() { echo -e "${YELLOW}  ⚠  $*${NC}"; }
-fail() { echo -e "${RED}  ✗  $*${NC}"; exit 1; }
 step() { echo -e "\n${BLUE}── $* ──────────────────────────────${NC}"; }
 
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════╗"
-echo "║  dashboard-back — Firebase SSO endpoint  ║"
+echo "║  dashboard-back — fix expiresIn types    ║"
 echo "╚══════════════════════════════════════════╝"
 echo -e "${NC}"
 
-[[ -f "package.json" ]]                || fail "Corré desde la raíz de dashboard-back"
-[[ -f "src/auth/auth.service.ts" ]]    || fail "No encontré src/auth/auth.service.ts"
-[[ -f "src/auth/auth.controller.ts" ]] || fail "No encontré src/auth/auth.controller.ts"
-[[ -f "src/auth/auth.module.ts" ]]     || fail "No encontré src/auth/auth.module.ts"
+# ─── 1. auth.module.ts ───────────────────────────────────────────────────────
+step "1/2  src/auth/auth.module.ts"
 
-# ─── 1. Instalar @nestjs/jwt si no está ──────────────────────────────────────
-step "1/5  Dependencias"
-if grep -q '"@nestjs/jwt"' package.json; then
-  ok "@nestjs/jwt ya está en package.json"
-else
-  pnpm add @nestjs/jwt
-  ok "@nestjs/jwt instalado"
-fi
+cat > src/auth/auth.module.ts << 'EOF'
+// src/auth/auth.module.ts
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { AuditModule } from '../audit/audit.module';
 
-# ─── 2. DTO ──────────────────────────────────────────────────────────────────
-step "2/5  src/auth/dto/firebase-sso.dto.ts"
-cat > src/auth/dto/firebase-sso.dto.ts << 'EOF'
-// src/auth/dto/firebase-sso.dto.ts
-import { IsString, IsNotEmpty } from 'class-validator';
-
-export class FirebaseSsoDto {
-  @IsString()
-  @IsNotEmpty()
-  firebaseIdToken: string;
-}
+@Module({
+  imports: [
+    AuditModule,
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports:    [ConfigModule],
+      inject:     [ConfigService],
+      useFactory: (cs: ConfigService) => ({
+        secret:      cs.get<string>('JWT_ACCESS_SECRET', 'change_me_access'),
+        signOptions: {
+          // cast necesario: @nestjs/jwt v11 exige StringValue, no string genérico
+          expiresIn: (cs.get<string>('JWT_ACCESS_EXPIRES_IN', '15m')) as any,
+        },
+      }),
+    }),
+  ],
+  controllers: [AuthController],
+  providers:   [AuthService],
+  exports:     [AuthService],
+})
+export class AuthModule {}
 EOF
-ok "firebase-sso.dto.ts"
+ok "auth.module.ts"
 
-# ─── 3. auth.service.ts  (reescritura completa) ───────────────────────────────
-step "3/5  src/auth/auth.service.ts"
+# ─── 2. auth.service.ts — solo los dos jwtService.sign ───────────────────────
+step "2/2  src/auth/auth.service.ts"
+
 cat > src/auth/auth.service.ts << 'EOF'
 // src/auth/auth.service.ts
 import {
@@ -75,10 +83,7 @@ export class AuthService {
     @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
   ) {}
 
-  /**
-   * POST /api/v1/auth/sync
-   * Upsert del usuario en base al firebaseUid.
-   */
+  /** POST /api/v1/auth/sync */
   async sync(dto: SyncAuthDto) {
     const user = await this.prisma.user.upsert({
       where: { firebaseUid: dto.firebaseUid },
@@ -95,13 +100,8 @@ export class AuthService {
         ...(dto.nombre && { nombre: dto.nombre }),
       },
       select: {
-        id:          true,
-        email:       true,
-        nombre:      true,
-        role:        true,
-        firebaseUid: true,
-        isActive:    true,
-        createdAt:   true,
+        id: true, email: true, nombre: true, role: true,
+        firebaseUid: true, isActive: true, createdAt: true,
       },
     });
 
@@ -116,20 +116,13 @@ export class AuthService {
     return user;
   }
 
-  /**
-   * GET /api/v1/auth/me
-   */
+  /** GET /api/v1/auth/me */
   async me(firebaseUid: string) {
     const user = await this.prisma.user.findUnique({
-      where: { firebaseUid },
+      where:  { firebaseUid },
       select: {
-        id:          true,
-        email:       true,
-        nombre:      true,
-        role:        true,
-        firebaseUid: true,
-        isActive:    true,
-        createdAt:   true,
+        id: true, email: true, nombre: true, role: true,
+        firebaseUid: true, isActive: true, createdAt: true,
       },
     });
 
@@ -140,11 +133,7 @@ export class AuthService {
     return user;
   }
 
-  /**
-   * POST /api/v1/auth/firebase-sso
-   * Recibe Firebase ID token desde real-front, valida identidad,
-   * busca/crea usuario en la DB del dashboard y emite JWT del sistema.
-   */
+  /** POST /api/v1/auth/firebase-sso */
   async firebaseSso(dto: FirebaseSsoDto): Promise<{
     accessToken:  string;
     refreshToken: string;
@@ -168,7 +157,7 @@ export class AuthService {
 
     // 2. Buscar o crear usuario
     let user = await this.prisma.user.findFirst({
-      where: { OR: [{ firebaseUid: uid }, { email }] },
+      where:  { OR: [{ firebaseUid: uid }, { email }] },
       select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
     });
 
@@ -183,7 +172,7 @@ export class AuthService {
         },
         select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
       });
-      this.logger.log(`SSO: nuevo usuario creado — ${email}`);
+      this.logger.log(`SSO: nuevo usuario — ${email}`);
     } else if (!user.firebaseUid) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -197,16 +186,18 @@ export class AuthService {
     }
 
     // 4. Emitir JWT
+    // "as any" necesario: @nestjs/jwt v11 exige StringValue en expiresIn,
+    // pero process.env devuelve string genérico — en runtime el valor es correcto.
     const payload = { sub: user.id, email: user.email, role: user.role };
 
     const accessToken = this.jwtService.sign(payload, {
       secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
-      expiresIn: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m',
+      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
     });
 
     const refreshToken = this.jwtService.sign(payload, {
       secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
-      expiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
+      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
     });
 
     // 5. Persistir refresh token
@@ -235,98 +226,7 @@ export class AuthService {
 EOF
 ok "auth.service.ts"
 
-# ─── 4. auth.controller.ts  (reescritura completa) ───────────────────────────
-step "4/5  src/auth/auth.controller.ts"
-cat > src/auth/auth.controller.ts << 'EOF'
-// src/auth/auth.controller.ts
-import {
-  Controller,
-  Post,
-  Get,
-  Body,
-  HttpCode,
-  HttpStatus,
-  Request,
-} from '@nestjs/common';
-import { AuthService } from './auth.service';
-import { SyncAuthDto } from './dto/sync-auth.dto';
-import { FirebaseSsoDto } from './dto/firebase-sso.dto';
-import { Public } from '../common/decorators/public.decorator';
-import type { Request as ExpressRequest } from 'express';
-
-@Controller('api/v1/auth')
-export class AuthController {
-  constructor(private readonly authService: AuthService) {}
-
-  /** POST /api/v1/auth/sync */
-  @Post('sync')
-  @HttpCode(HttpStatus.OK)
-  sync(@Body() dto: SyncAuthDto) {
-    return this.authService.sync(dto);
-  }
-
-  /** GET /api/v1/auth/me */
-  @Get('me')
-  me(@Request() req: ExpressRequest) {
-    const firebaseUid = (req as any).user?.firebaseUid as string;
-    return this.authService.me(firebaseUid);
-  }
-
-  /**
-   * POST /api/v1/auth/firebase-sso
-   * Ruta pública. Recibe Firebase ID token de real-front
-   * y devuelve accessToken + refreshToken del dashboard.
-   */
-  @Public()
-  @Post('firebase-sso')
-  @HttpCode(HttpStatus.OK)
-  firebaseSso(@Body() dto: FirebaseSsoDto) {
-    return this.authService.firebaseSso(dto);
-  }
-}
-EOF
-ok "auth.controller.ts"
-
-# ─── 5. auth.module.ts  (reescritura completa) ───────────────────────────────
-step "5/5  src/auth/auth.module.ts"
-cat > src/auth/auth.module.ts << 'EOF'
-// src/auth/auth.module.ts
-import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { AuthController } from './auth.controller';
-import { AuthService } from './auth.service';
-import { AuditModule } from '../audit/audit.module';
-
-@Module({
-  imports: [
-    AuditModule,
-    ConfigModule,
-    JwtModule.registerAsync({
-      imports:    [ConfigModule],
-      inject:     [ConfigService],
-      useFactory: (cs: ConfigService) => ({
-        secret:      cs.get<string>('JWT_ACCESS_SECRET', 'change_me_access'),
-        signOptions: { expiresIn: cs.get<string>('JWT_ACCESS_EXPIRES_IN', '15m') },
-      }),
-    }),
-  ],
-  controllers: [AuthController],
-  providers:   [AuthService],
-  exports:     [AuthService],
-})
-export class AuthModule {}
-EOF
-ok "auth.module.ts"
-
 echo ""
-echo -e "${GREEN}══ dashboard-back listo ══════════════════════════════════════${NC}"
-echo "  Archivos reescritos:"
-echo "    src/auth/dto/firebase-sso.dto.ts"
-echo "    src/auth/auth.service.ts"
-echo "    src/auth/auth.controller.ts"
-echo "    src/auth/auth.module.ts"
-echo ""
-echo "  → pnpm start:dev"
-echo "  → POST /api/v1/auth/firebase-sso  { firebaseIdToken: string }"
+echo -e "${GREEN}══ listo — volvé a buildear ══════════════════════════════════${NC}"
+echo "  → pnpm run build"
 echo ""
