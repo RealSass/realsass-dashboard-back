@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# fix-controllers-prefix.sh
-# Quita el prefijo api/v1 de los @Controller porque ya está en setGlobalPrefix
-# USO: cd <raiz-de-dashboard-back> && bash fix-controllers-prefix.sh
+# fix-add-refresh.sh
+# Agrega POST /api/v1/auth/refresh al dashboard-back
+# USO: cd <raiz-de-dashboard-back> && bash fix-add-refresh.sh
 # =============================================================================
 set -euo pipefail
 GREEN='\033[0;32m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -11,12 +11,245 @@ step() { echo -e "\n${BLUE}── $* ──────────────�
 
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════╗"
-echo "║  dashboard-back — fix @Controller prefix ║"
+echo "║  dashboard-back — POST /auth/refresh     ║"
 echo "╚══════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# ─── auth.controller.ts ──────────────────────────────────────────────────────
-step "src/auth/auth.controller.ts"
+# ─── 1. DTO ──────────────────────────────────────────────────────────────────
+step "1/3  src/auth/dto/refresh-token.dto.ts"
+cat > src/auth/dto/refresh-token.dto.ts << 'EOF'
+// src/auth/dto/refresh-token.dto.ts
+import { IsString, IsNotEmpty } from 'class-validator';
+
+export class RefreshTokenDto {
+  @IsString()
+  @IsNotEmpty()
+  refreshToken: string;
+}
+EOF
+ok "refresh-token.dto.ts"
+
+# ─── 2. Método refresh en auth.service.ts ────────────────────────────────────
+step "2/3  src/auth/auth.service.ts — agregar refresh()"
+cat > src/auth/auth.service.ts << 'EOF'
+// src/auth/auth.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+  ForbiddenException,
+  Inject,
+  Logger,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { FIREBASE_ADMIN } from '../firebase/firebase.module';
+import type * as admin from 'firebase-admin';
+import { SyncAuthDto } from './dto/sync-auth.dto';
+import { FirebaseSsoDto } from './dto/firebase-sso.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly jwtService: JwtService,
+    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
+  ) {}
+
+  /** POST /api/v1/auth/sync */
+  async sync(dto: SyncAuthDto) {
+    const user = await this.prisma.user.upsert({
+      where: { firebaseUid: dto.firebaseUid },
+      create: {
+        firebaseUid:   dto.firebaseUid,
+        firebaseEmail: dto.email,
+        email:         dto.email,
+        nombre:        dto.nombre ?? dto.email.split('@')[0],
+        role:          'AGENTE',
+      },
+      update: {
+        firebaseEmail: dto.email,
+        email:         dto.email,
+        ...(dto.nombre && { nombre: dto.nombre }),
+      },
+      select: {
+        id: true, email: true, nombre: true, role: true,
+        firebaseUid: true, isActive: true, createdAt: true,
+      },
+    });
+
+    await this.audit.log({
+      action:     'auth.sync',
+      entityType: 'User',
+      entityId:   user.id,
+      userId:     user.id,
+      payload:    { email: dto.email },
+    });
+
+    return user;
+  }
+
+  /** GET /api/v1/auth/me */
+  async me(firebaseUid: string) {
+    const user = await this.prisma.user.findUnique({
+      where:  { firebaseUid },
+      select: {
+        id: true, email: true, nombre: true, role: true,
+        firebaseUid: true, isActive: true, createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado. Llamar a /auth/sync primero.');
+    }
+
+    return user;
+  }
+
+  /** POST /api/v1/auth/firebase-sso */
+  async firebaseSso(dto: FirebaseSsoDto): Promise<{
+    accessToken:  string;
+    refreshToken: string;
+    user: { id: string; email: string; nombre: string; role: string };
+  }> {
+    if (!this.firebase) {
+      throw new UnauthorizedException('Firebase no configurado en este entorno');
+    }
+
+    let decoded: admin.auth.DecodedIdToken;
+    try {
+      decoded = await this.firebase.auth().verifyIdToken(dto.firebaseIdToken, true);
+    } catch (err) {
+      this.logger.warn(`SSO token inválido: ${(err as Error).message}`);
+      throw new UnauthorizedException('Token de Firebase inválido o expirado');
+    }
+
+    const uid   = decoded.uid;
+    const email = decoded.email ?? '';
+
+    let user = await this.prisma.user.findFirst({
+      where:  { OR: [{ firebaseUid: uid }, { email }] },
+      select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          firebaseUid:   uid,
+          firebaseEmail: email,
+          email,
+          nombre: decoded.name ?? email.split('@')[0] ?? 'Usuario',
+          role:   'AGENTE',
+        },
+        select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
+      });
+      this.logger.log(`SSO: nuevo usuario — ${email}`);
+    } else if (!user.firebaseUid) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data:  { firebaseUid: uid, firebaseEmail: email },
+      });
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenException('Cuenta desactivada. Contactá al administrador.');
+    }
+
+    const payload = { sub: user.id, email: user.email, nombre: user.nombre, role: user.role };
+
+    const accessToken = this.jwtService.sign(payload, {
+      secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
+      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
+      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
+    });
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:  { refreshToken },
+    });
+
+    await this.audit.log({
+      action:     'auth.firebase_sso',
+      entityType: 'User',
+      entityId:   user.id,
+      userId:     user.id,
+      payload:    { email: user.email, role: user.role },
+    });
+
+    this.logger.log(`SSO exitoso — ${user.email} (${user.role})`);
+
+    return { accessToken, refreshToken, user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role } };
+  }
+
+  /**
+   * POST /api/v1/auth/refresh
+   * El dashboard-front llama este endpoint cuando el accessToken expira.
+   * Verifica el refreshToken, emite un nuevo par de tokens.
+   */
+  async refresh(dto: RefreshTokenDto): Promise<{
+    accessToken:  string;
+    refreshToken: string;
+  }> {
+    // 1. Verificar que el refreshToken sea válido
+    let payload: { sub: string; email: string; nombre?: string; role: string };
+    try {
+      payload = this.jwtService.verify(dto.refreshToken, {
+        secret: process.env['JWT_REFRESH_SECRET'] ?? 'change_me_refresh',
+      });
+    } catch {
+      throw new UnauthorizedException('Refresh token inválido o expirado');
+    }
+
+    // 2. Verificar que el usuario exista y el token coincida en DB
+    const user = await this.prisma.user.findFirst({
+      where:  { id: payload.sub, refreshToken: dto.refreshToken },
+      select: { id: true, email: true, nombre: true, role: true, isActive: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Refresh token revocado o usuario no encontrado');
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenException('Cuenta desactivada.');
+    }
+
+    // 3. Emitir nuevos tokens
+    const newPayload = { sub: user.id, email: user.email, nombre: user.nombre, role: user.role };
+
+    const accessToken = this.jwtService.sign(newPayload, {
+      secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
+      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
+    });
+
+    const refreshToken = this.jwtService.sign(newPayload, {
+      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
+      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
+    });
+
+    // 4. Rotar el refresh token en DB
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:  { refreshToken },
+    });
+
+    return { accessToken, refreshToken };
+  }
+}
+EOF
+ok "auth.service.ts — refresh() agregado"
+
+# ─── 3. Endpoint en auth.controller.ts ───────────────────────────────────────
+step "3/3  src/auth/auth.controller.ts — agregar POST /auth/refresh"
 cat > src/auth/auth.controller.ts << 'EOF'
 // src/auth/auth.controller.ts
 import {
@@ -31,6 +264,7 @@ import {
 import { AuthService } from './auth.service';
 import { SyncAuthDto } from './dto/sync-auth.dto';
 import { FirebaseSsoDto } from './dto/firebase-sso.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { Public } from '../common/decorators/public.decorator';
 import type { Request as ExpressRequest } from 'express';
 
@@ -52,63 +286,38 @@ export class AuthController {
     return this.authService.me(firebaseUid);
   }
 
-  /**
-   * POST /api/v1/auth/firebase-sso
-   * Ruta pública. Recibe Firebase ID token de real-front
-   * y devuelve accessToken + refreshToken del dashboard.
-   */
+  /** POST /api/v1/auth/firebase-sso */
   @Public()
   @Post('firebase-sso')
   @HttpCode(HttpStatus.OK)
   firebaseSso(@Body() dto: FirebaseSsoDto) {
     return this.authService.firebaseSso(dto);
   }
+
+  /**
+   * POST /api/v1/auth/refresh
+   * Ruta pública. El dashboard-front renueva tokens cuando expira el accessToken.
+   */
+  @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto);
+  }
 }
 EOF
-ok "auth.controller.ts — @Controller('auth')"
-
-# ─── zonas.controller.ts ─────────────────────────────────────────────────────
-step "src/zonas/zonas.controller.ts"
-if [[ -f "src/zonas/zonas.controller.ts" ]]; then
-  # Reemplazar @Controller('api/v1/zonas') por @Controller('zonas')
-  LC_ALL=C sed -i "s|@Controller('api/v1/zonas')|@Controller('zonas')|g" src/zonas/zonas.controller.ts
-  ok "zonas.controller.ts — @Controller('zonas')"
-else
-  ok "zonas.controller.ts — no existe, saltando"
-fi
-
-# ─── propiedades.controller.ts ───────────────────────────────────────────────
-step "src/propiedades/propiedades.controller.ts"
-if [[ -f "src/propiedades/propiedades.controller.ts" ]]; then
-  LC_ALL=C sed -i "s|@Controller('api/v1/propiedades')|@Controller('propiedades')|g" src/propiedades/propiedades.controller.ts
-  ok "propiedades.controller.ts — @Controller('propiedades')"
-else
-  ok "propiedades.controller.ts — no existe, saltando"
-fi
-
-# ─── Buscar cualquier otro controller con api/v1 hardcodeado ─────────────────
-step "Verificando controllers restantes"
-REMAINING=$(grep -r "@Controller('api/v1" src/ --include="*.ts" -l 2>/dev/null || true)
-if [[ -n "$REMAINING" ]]; then
-  echo "$REMAINING" | while read -r file; do
-    LC_ALL=C sed -i "s|@Controller('api/v1/\([^']*\)')|@Controller('\1')|g" "$file"
-    ok "$file — prefijo api/v1 eliminado"
-  done
-else
-  ok "No quedan controllers con api/v1 hardcodeado"
-fi
+ok "auth.controller.ts — POST /auth/refresh agregado"
 
 echo ""
 echo -e "${GREEN}══ listo ═════════════════════════════════════════════════════${NC}"
-echo "  Todos los controllers usan rutas relativas."
-echo "  El setGlobalPrefix('api/v1') en main.ts las prefija automáticamente."
-echo ""
-echo "  Rutas resultantes:"
+echo "  Endpoints disponibles:"
 echo "    POST /api/v1/auth/sync"
 echo "    GET  /api/v1/auth/me"
 echo "    POST /api/v1/auth/firebase-sso"
-echo "    GET  /api/v1/zonas"
-echo "    GET  /api/v1/propiedades"
+echo "    POST /api/v1/auth/refresh"
+echo ""
+echo "  Variable requerida en Railway → dashboard-front:"
+echo "    NEXT_PUBLIC_API_URL=https://realsass-dashboard-back-production.up.railway.app/api/v1"
 echo ""
 echo "  → pnpm run build"
 echo ""

@@ -14,6 +14,7 @@ import { FIREBASE_ADMIN } from '../firebase/firebase.module';
 import type * as admin from 'firebase-admin';
 import { SyncAuthDto } from './dto/sync-auth.dto';
 import { FirebaseSsoDto } from './dto/firebase-sso.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @Injectable()
 export class AuthService {
@@ -86,7 +87,6 @@ export class AuthService {
       throw new UnauthorizedException('Firebase no configurado en este entorno');
     }
 
-    // 1. Verificar token Firebase
     let decoded: admin.auth.DecodedIdToken;
     try {
       decoded = await this.firebase.auth().verifyIdToken(dto.firebaseIdToken, true);
@@ -98,7 +98,6 @@ export class AuthService {
     const uid   = decoded.uid;
     const email = decoded.email ?? '';
 
-    // 2. Buscar o crear usuario
     let user = await this.prisma.user.findFirst({
       where:  { OR: [{ firebaseUid: uid }, { email }] },
       select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
@@ -123,15 +122,11 @@ export class AuthService {
       });
     }
 
-    // 3. Verificar cuenta activa
     if (!user.isActive) {
       throw new ForbiddenException('Cuenta desactivada. Contactá al administrador.');
     }
 
-    // 4. Emitir JWT
-    // "as any" necesario: @nestjs/jwt v11 exige StringValue en expiresIn,
-    // pero process.env devuelve string genérico — en runtime el valor es correcto.
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    const payload = { sub: user.id, email: user.email, nombre: user.nombre, role: user.role };
 
     const accessToken = this.jwtService.sign(payload, {
       secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
@@ -143,7 +138,6 @@ export class AuthService {
       expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
     });
 
-    // 5. Persistir refresh token
     await this.prisma.user.update({
       where: { id: user.id },
       data:  { refreshToken },
@@ -159,10 +153,61 @@ export class AuthService {
 
     this.logger.log(`SSO exitoso — ${user.email} (${user.role})`);
 
-    return {
-      accessToken,
-      refreshToken,
-      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
-    };
+    return { accessToken, refreshToken, user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role } };
+  }
+
+  /**
+   * POST /api/v1/auth/refresh
+   * El dashboard-front llama este endpoint cuando el accessToken expira.
+   * Verifica el refreshToken, emite un nuevo par de tokens.
+   */
+  async refresh(dto: RefreshTokenDto): Promise<{
+    accessToken:  string;
+    refreshToken: string;
+  }> {
+    // 1. Verificar que el refreshToken sea válido
+    let payload: { sub: string; email: string; nombre?: string; role: string };
+    try {
+      payload = this.jwtService.verify(dto.refreshToken, {
+        secret: process.env['JWT_REFRESH_SECRET'] ?? 'change_me_refresh',
+      });
+    } catch {
+      throw new UnauthorizedException('Refresh token inválido o expirado');
+    }
+
+    // 2. Verificar que el usuario exista y el token coincida en DB
+    const user = await this.prisma.user.findFirst({
+      where:  { id: payload.sub, refreshToken: dto.refreshToken },
+      select: { id: true, email: true, nombre: true, role: true, isActive: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Refresh token revocado o usuario no encontrado');
+    }
+
+    if (!user.isActive) {
+      throw new ForbiddenException('Cuenta desactivada.');
+    }
+
+    // 3. Emitir nuevos tokens
+    const newPayload = { sub: user.id, email: user.email, nombre: user.nombre, role: user.role };
+
+    const accessToken = this.jwtService.sign(newPayload, {
+      secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
+      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
+    });
+
+    const refreshToken = this.jwtService.sign(newPayload, {
+      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
+      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
+    });
+
+    // 4. Rotar el refresh token en DB
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:  { refreshToken },
+    });
+
+    return { accessToken, refreshToken };
   }
 }

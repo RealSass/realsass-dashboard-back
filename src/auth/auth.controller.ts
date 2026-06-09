@@ -11,6 +11,7 @@ import {
 import { AuthService } from './auth.service';
 import { SyncAuthDto } from './dto/sync-auth.dto';
 import { FirebaseSsoDto } from './dto/firebase-sso.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { Public } from '../common/decorators/public.decorator';
 import type { Request as ExpressRequest } from 'express';
 
@@ -32,15 +33,22 @@ export class AuthController {
     return this.authService.me(firebaseUid);
   }
 
-  /**
-   * POST /api/v1/auth/firebase-sso
-   * Ruta pública. Recibe Firebase ID token de real-front
-   * y devuelve accessToken + refreshToken del dashboard.
-   */
+  /** POST /api/v1/auth/firebase-sso */
   @Public()
   @Post('firebase-sso')
   @HttpCode(HttpStatus.OK)
   firebaseSso(@Body() dto: FirebaseSsoDto) {
     return this.authService.firebaseSso(dto);
+  }
+
+  /**
+   * POST /api/v1/auth/refresh
+   * Ruta pública. El dashboard-front renueva tokens cuando expira el accessToken.
+   */
+  @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto);
   }
 }
