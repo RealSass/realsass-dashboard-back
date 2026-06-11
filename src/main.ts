@@ -1,5 +1,5 @@
 // src/main.ts
-import { NestFactory }           from '@nestjs/core';
+import { NestFactory }            from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService }          from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -13,28 +13,22 @@ async function bootstrap() {
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  // ── Cookie parser (necesario para leer req.cookies) ───────────────────────
   app.use(cookieParser());
-
-  // ── Prefijo global ────────────────────────────────────────────────────────
   app.setGlobalPrefix('api/v1');
 
-  // ── CORS — credentials=true para que el browser envíe cookies cross-domain
-  const allowedOrigins = (config.get<string>('ALLOWED_ORIGINS', '') || '')
+  const rawOrigins = config.get<string>('ALLOWED_ORIGINS', '');
+  const allowedOrigins = rawOrigins
     .split(',')
     .map(o => o.trim())
     .filter(Boolean);
 
   app.enableCors({
-    origin: allowedOrigins.length > 0
-      ? allowedOrigins
-      : true,               // en dev sin config, permitir todo
-    methods:          ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders:   ['Content-Type', 'Authorization', 'x-organization-id'],
-    credentials:      true, // ← REQUERIDO para que el browser envíe cookies
+    origin:         allowedOrigins.length > 0 ? allowedOrigins : true,
+    methods:        ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-organization-id'],
+    credentials:    true,
   });
 
-  // ── Pipes ─────────────────────────────────────────────────────────────────
   app.useGlobalPipes(new ValidationPipe({
     whitelist:            true,
     forbidNonWhitelisted: true,
@@ -42,28 +36,23 @@ async function bootstrap() {
     transformOptions:     { enableImplicitConversion: true },
   }));
 
-  // ── Filters & interceptors ────────────────────────────────────────────────
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  // ── Swagger ───────────────────────────────────────────────────────────────
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Dashboard API')
-    .setDescription('Real Estate Dashboard — API docs')
     .setVersion('1.0')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'firebase-jwt')
     .build();
-
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/v1/docs', app, document);
+  SwaggerModule.setup('api/v1/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
   const port = config.get<number>('PORT', 3000);
   await app.listen(port);
 
-  logger.log(`🚀 Dashboard API corriendo en: http://localhost:${port}`);
+  logger.log(`🚀 Dashboard API en: http://localhost:${port}`);
   logger.log(`🔥 Firebase Auth SSO activo`);
   logger.log(`📡 Prefix: /api/v1`);
-  logger.log(`🍪 Cookie-based auth habilitado`);
+  logger.log(`🍪 Cookies habilitadas`);
 }
 
 bootstrap();

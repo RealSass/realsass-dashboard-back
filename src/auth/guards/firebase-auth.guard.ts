@@ -11,9 +11,8 @@ import { Reflector }    from '@nestjs/core';
 import type { Request } from 'express';
 import type * as admin  from 'firebase-admin';
 import { FIREBASE_ADMIN } from '../../firebase/firebase.module';
-import { IS_PUBLIC_KEY }  from '../guards/firebase-auth.guard';
 
-export { IS_PUBLIC_KEY };
+export const IS_PUBLIC_KEY = 'isPublic';
 
 @Injectable()
 export class FirebaseAuthGuard implements CanActivate {
@@ -57,8 +56,8 @@ export class FirebaseAuthGuard implements CanActivate {
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
     if (type === 'Bearer' && token) return token;
 
-    // 2. Cookie access_token (para requests cross-domain con credentials)
-    const cookie = request.cookies?.['access_token'] as string | undefined;
+    // 2. Cookie access_token (cross-domain con credentials:include)
+    const cookie = (request.cookies as Record<string, string> | undefined)?.['access_token'];
     if (cookie) return cookie;
 
     return null;
