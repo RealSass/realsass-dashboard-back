@@ -61,19 +61,12 @@ export class AuthService {
   }
 
   /** GET /api/v1/auth/me */
-  async me(firebaseUid: string) {
-    const user = await this.prisma.user.findUnique({
-      where:  { firebaseUid },
-      select: {
-        id: true, email: true, nombre: true, role: true,
-        firebaseUid: true, isActive: true, createdAt: true,
-      },
+  async me(uidOrId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { OR: [{ firebaseUid: uidOrId }, { id: uidOrId }] },
+      select: { id: true, email: true, nombre: true, role: true, firebaseUid: true, isActive: true, createdAt: true },
     });
-
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado. Llamar a /auth/sync primero.');
-    }
-
+    if (!user) throw new NotFoundException("Usuario no encontrado.");
     return user;
   }
 

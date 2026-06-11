@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# fix-cookies-dashboard-back.sh — v2 (fix circular import)
+# fix-guard-and-dto.sh — sin Python
+# Repo: real-dashboard-back
+#
+# PROBLEMA: FirebaseAuthGuard verifica la cookie con firebase.verifyIdToken()
+# pero la cookie contiene un JWT propio → error "no kid claim"
+#
+# SOLUCIÓN: cookie → JwtService.verify() / header → firebase.verifyIdToken()
 # =============================================================================
 set -euo pipefail
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -10,13 +16,16 @@ step() { echo -e "\n${YELLOW}▶${NC} $1"; }
 [ -f "package.json" ] || { echo "Ejecutá desde el root de real-dashboard-back"; exit 1; }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. src/auth/guards/firebase-auth.guard.ts — sin circular export
+# 1. src/auth/guards/firebase-auth.guard.ts
 # ─────────────────────────────────────────────────────────────────────────────
-step "Reescribiendo src/auth/guards/firebase-auth.guard.ts"
+step "src/auth/guards/firebase-auth.guard.ts"
 mkdir -p src/auth/guards
 
 cat > src/auth/guards/firebase-auth.guard.ts << 'EOF'
 // src/auth/guards/firebase-auth.guard.ts
+//
+// Cookie access_token  → JWT propio  → JwtService.verify()
+// Header Authorization → Firebase ID token → firebase.auth().verifyIdToken()
 import {
   Injectable,
   CanActivate,
@@ -25,9 +34,11 @@ import {
   Inject,
   Logger,
 } from '@nestjs/common';
-import { Reflector }    from '@nestjs/core';
-import type { Request } from 'express';
-import type * as admin  from 'firebase-admin';
+import { Reflector }     from '@nestjs/core';
+import { JwtService }    from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import type { Request }  from 'express';
+import type * as admin   from 'firebase-admin';
 import { FIREBASE_ADMIN } from '../../firebase/firebase.module';
 
 export const IS_PUBLIC_KEY = 'isPublic';
@@ -39,6 +50,8 @@ export class FirebaseAuthGuard implements CanActivate {
   constructor(
     @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
     private readonly reflector: Reflector,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -49,14 +62,39 @@ export class FirebaseAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<Request>();
-    const token   = this.extractToken(request);
+    const { token, source } = this.extractToken(request);
 
     if (!token) throw new UnauthorizedException('Token de autenticación requerido');
-    if (!this.firebase) throw new UnauthorizedException('Firebase no configurado');
 
+    return source === 'cookie'
+      ? this.verifyJwt(token, request)
+      : this.verifyFirebase(token, request);
+  }
+
+  private verifyJwt(token: string, request: Request): boolean {
+    try {
+      const secret = this.configService.get<string>('JWT_ACCESS_SECRET', 'change_me_access');
+      const payload = this.jwtService.verify(token, { secret }) as {
+        sub: string; email: string; nombre: string; role: string;
+      };
+      (request as any).user = {
+        uid:         payload.sub,
+        email:       payload.email,
+        firebaseUid: payload.sub,
+        nombre:      payload.nombre,
+        role:        payload.role,
+      };
+      return true;
+    } catch (err) {
+      this.logger.warn(`JWT inválido: ${(err as Error).message}`);
+      throw new UnauthorizedException('Token inválido o expirado');
+    }
+  }
+
+  private async verifyFirebase(token: string, request: Request): Promise<boolean> {
+    if (!this.firebase) throw new UnauthorizedException('Firebase no configurado');
     try {
       const decoded = await this.firebase.auth().verifyIdToken(token, true);
-      (request as any).firebaseUser = decoded;
       (request as any).user = {
         uid:         decoded.uid,
         email:       decoded.email ?? '',
@@ -64,67 +102,120 @@ export class FirebaseAuthGuard implements CanActivate {
       };
       return true;
     } catch (err) {
-      this.logger.warn(`Token inválido: ${(err as Error).message}`);
+      this.logger.warn(`Firebase token inválido: ${(err as Error).message}`);
       throw new UnauthorizedException('Token inválido o expirado');
     }
   }
 
-  private extractToken(request: Request): string | null {
-    // 1. Authorization: Bearer <token>
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    if (type === 'Bearer' && token) return token;
-
-    // 2. Cookie access_token (cross-domain con credentials:include)
+  private extractToken(request: Request): { token: string | null; source: 'cookie' | 'header' } {
     const cookie = (request.cookies as Record<string, string> | undefined)?.['access_token'];
-    if (cookie) return cookie;
+    if (cookie) return { token: cookie, source: 'cookie' };
 
-    return null;
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    if (type === 'Bearer' && token) return { token, source: 'header' };
+
+    return { token: null, source: 'header' };
   }
 }
 EOF
 ok "src/auth/guards/firebase-auth.guard.ts"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. src/common/decorators/public.decorator.ts — usa IS_PUBLIC_KEY del guard
+# 2. src/auth/auth.module.ts
 # ─────────────────────────────────────────────────────────────────────────────
-step "Actualizando src/common/decorators/public.decorator.ts"
-mkdir -p src/common/decorators
+step "src/auth/auth.module.ts"
 
-cat > src/common/decorators/public.decorator.ts << 'EOF'
-// src/common/decorators/public.decorator.ts
-import { SetMetadata } from '@nestjs/common';
-import { IS_PUBLIC_KEY } from '../../auth/guards/firebase-auth.guard';
+cat > src/auth/auth.module.ts << 'EOF'
+// src/auth/auth.module.ts
+import { Module }        from '@nestjs/common';
+import { JwtModule }     from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthController }  from './auth.controller';
+import { AuthService }     from './auth.service';
+import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
+import { AuditModule }     from '../audit/audit.module';
 
-export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+@Module({
+  imports: [
+    AuditModule,
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports:    [ConfigModule],
+      inject:     [ConfigService],
+      useFactory: (cs: ConfigService) => ({
+        secret:      cs.get<string>('JWT_ACCESS_SECRET', 'change_me_access'),
+        signOptions: {
+          expiresIn: cs.get<string>('JWT_ACCESS_EXPIRES_IN', '15m') as any,
+        },
+      }),
+    }),
+  ],
+  controllers: [AuthController],
+  providers:   [AuthService, FirebaseAuthGuard],
+  exports:     [AuthService, FirebaseAuthGuard, JwtModule],
+})
+export class AuthModule {}
 EOF
-ok "src/common/decorators/public.decorator.ts"
+ok "src/auth/auth.module.ts"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. src/auth/auth.controller.ts
+# 3. src/auth/auth.service.ts — me() busca por id O firebaseUid
+#    Reemplazar solo el método me() con sed
 # ─────────────────────────────────────────────────────────────────────────────
-step "Reescribiendo src/auth/auth.controller.ts"
-mkdir -p src/auth
+step "src/auth/auth.service.ts — actualizando me()"
+
+# Escribir el nuevo método en un archivo temporal y usar cat para reemplazar
+# el archivo completo leyendo el existente y reemplazando el método me()
+
+# Leer el contenido actual, reemplazar el bloque me() y escribir de vuelta
+# Usamos awk para reemplazar entre "async me(" y el cierre del método
+awk '
+/async me\(firebaseUid: string\)/ { in_me=1; depth=0 }
+in_me {
+  for(i=1;i<=length($0);i++) {
+    c=substr($0,i,1)
+    if(c=="{") depth++
+    if(c=="}") { depth--; if(depth==0) { in_me=0; print "  async me(uidOrId: string) {\n    const user = await this.prisma.user.findFirst({\n      where: { OR: [{ firebaseUid: uidOrId }, { id: uidOrId }] },\n      select: { id: true, email: true, nombre: true, role: true, firebaseUid: true, isActive: true, createdAt: true },\n    });\n    if (!user) throw new NotFoundException(\"Usuario no encontrado.\");\n    return user;\n  }"; next } }
+  }
+  next
+}
+{ print }
+' src/auth/auth.service.ts > src/auth/auth.service.ts.tmp \
+  && mv src/auth/auth.service.ts.tmp src/auth/auth.service.ts
+
+ok "src/auth/auth.service.ts"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. src/auth/dto/refresh-token.dto.ts
+# ─────────────────────────────────────────────────────────────────────────────
+step "src/auth/dto/refresh-token.dto.ts"
+
+cat > src/auth/dto/refresh-token.dto.ts << 'EOF'
+// src/auth/dto/refresh-token.dto.ts
+import { IsString, IsOptional } from 'class-validator';
+
+export class RefreshTokenDto {
+  // Opcional: viene de cookie HttpOnly O del body como fallback
+  @IsString()
+  @IsOptional()
+  refreshToken?: string;
+}
+EOF
+ok "src/auth/dto/refresh-token.dto.ts"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. src/auth/auth.controller.ts
+# ─────────────────────────────────────────────────────────────────────────────
+step "src/auth/auth.controller.ts"
 
 cat > src/auth/auth.controller.ts << 'EOF'
 // src/auth/auth.controller.ts
 import {
-  Controller,
-  Post,
-  Get,
-  Body,
-  Req,
-  Res,
-  HttpCode,
-  HttpStatus,
-  UseGuards,
+  Controller, Post, Get, Body,
+  Req, Res, HttpCode, HttpStatus, UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthService }       from './auth.service';
 import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
 import { FirebaseSsoDto }    from './dto/firebase-sso.dto';
@@ -135,34 +226,20 @@ import { CurrentUser }       from '../common/decorators/current-user.decorator';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-function setAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+function setAuthCookies(res: Response, access: string, refresh: string): void {
   const base = {
     httpOnly: true,
     secure:   IS_PROD,
     sameSite: IS_PROD ? ('none' as const) : ('lax' as const),
   };
-
-  res.cookie('access_token', accessToken, {
-    ...base,
-    path:   '/',
-    maxAge: 15 * 60 * 1000,
-  });
-
-  res.cookie('refresh_token', refreshToken, {
-    ...base,
-    path:   '/api/v1/auth/refresh',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  res.cookie('access_token',  access,  { ...base, path: '/',                        maxAge: 15 * 60 * 1000 });
+  res.cookie('refresh_token', refresh, { ...base, path: '/api/v1/auth/refresh',     maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
 
 function clearAuthCookies(res: Response): void {
-  const opts = {
-    httpOnly: true,
-    secure:   IS_PROD,
-    sameSite: IS_PROD ? ('none' as const) : ('lax' as const),
-  };
-  res.clearCookie('access_token',  { ...opts, path: '/' });
-  res.clearCookie('refresh_token', { ...opts, path: '/api/v1/auth/refresh' });
+  const base = { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? ('none' as const) : ('lax' as const) };
+  res.clearCookie('access_token',  { ...base, path: '/' });
+  res.clearCookie('refresh_token', { ...base, path: '/api/v1/auth/refresh' });
 }
 
 @ApiTags('auth')
@@ -173,8 +250,7 @@ export class AuthController {
   @Public()
   @Post('firebase-sso')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'SSO con Firebase ID Token → JWT + cookies' })
-  @ApiResponse({ status: 200, description: 'Login exitoso' })
+  @ApiOperation({ summary: 'Firebase ID Token → JWT propio + cookies HttpOnly' })
   async firebaseSso(
     @Body() dto: FirebaseSsoDto,
     @Res({ passthrough: true }) res: Response,
@@ -188,7 +264,7 @@ export class AuthController {
   @Post('sync')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('firebase-jwt')
-  @ApiOperation({ summary: 'Sincronizar usuario con Firebase' })
+  @ApiOperation({ summary: 'Sync usuario con Firebase' })
   async sync(
     @Body() dto: SyncAuthDto,
     @CurrentUser() cu: { uid: string; email: string },
@@ -217,6 +293,12 @@ export class AuthController {
       (req.cookies as Record<string, string> | undefined)?.['refresh_token']
       ?? dto.refreshToken;
 
+    if (!refreshToken) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false, message: 'Refresh token requerido',
+      });
+    }
+
     const result = await this.authService.refresh({ refreshToken });
     setAuthCookies(res, result.accessToken, result.refreshToken);
     return result;
@@ -225,7 +307,6 @@ export class AuthController {
   @Public()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Cerrar sesión' })
   logout(@Res({ passthrough: true }) res: Response) {
     clearAuthCookies(res);
     return { success: true, message: 'Sesión cerrada' };
@@ -234,85 +315,15 @@ export class AuthController {
 EOF
 ok "src/auth/auth.controller.ts"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. src/main.ts
-# ─────────────────────────────────────────────────────────────────────────────
-step "Reescribiendo src/main.ts"
-
-cat > src/main.ts << 'EOF'
-// src/main.ts
-import { NestFactory }            from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
-import { ConfigService }          from '@nestjs/config';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import * as cookieParser          from 'cookie-parser';
-import { AppModule }              from './app.module';
-import { HttpExceptionFilter }    from './common/filters/http-exception.filter';
-import { ResponseInterceptor }    from './common/interceptors/response.interceptor';
-
-async function bootstrap() {
-  const app    = await NestFactory.create(AppModule);
-  const config = app.get(ConfigService);
-  const logger = new Logger('Bootstrap');
-
-  app.use(cookieParser());
-  app.setGlobalPrefix('api/v1');
-
-  const rawOrigins = config.get<string>('ALLOWED_ORIGINS', '');
-  const allowedOrigins = rawOrigins
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean);
-
-  app.enableCors({
-    origin:         allowedOrigins.length > 0 ? allowedOrigins : true,
-    methods:        ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-organization-id'],
-    credentials:    true,
-  });
-
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist:            true,
-    forbidNonWhitelisted: true,
-    transform:            true,
-    transformOptions:     { enableImplicitConversion: true },
-  }));
-
-  app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new ResponseInterceptor());
-
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Dashboard API')
-    .setVersion('1.0')
-    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'firebase-jwt')
-    .build();
-  SwaggerModule.setup('api/v1/docs', app, SwaggerModule.createDocument(app, swaggerConfig));
-
-  const port = config.get<number>('PORT', 3000);
-  await app.listen(port);
-
-  logger.log(`🚀 Dashboard API en: http://localhost:${port}`);
-  logger.log(`🔥 Firebase Auth SSO activo`);
-  logger.log(`📡 Prefix: /api/v1`);
-  logger.log(`🍪 Cookies habilitadas`);
-}
-
-bootstrap();
-EOF
-ok "src/main.ts"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. Instalar cookie-parser
-# ─────────────────────────────────────────────────────────────────────────────
-step "Instalando cookie-parser"
-pnpm add cookie-parser
-pnpm add -D @types/cookie-parser
-ok "cookie-parser instalado"
-
 echo ""
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Completado. Agregar en Railway dashboard-back:${NC}"
+echo -e "${GREEN}  Completado${NC}"
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
 echo ""
-echo "  ALLOWED_ORIGINS=https://realsass-dashboard-front-production.up.railway.app,https://realsass-sass-front-production.up.railway.app"
+echo "  Archivos modificados:"
+echo "    src/auth/guards/firebase-auth.guard.ts"
+echo "    src/auth/auth.module.ts"
+echo "    src/auth/auth.service.ts"
+echo "    src/auth/dto/refresh-token.dto.ts"
+echo "    src/auth/auth.controller.ts"
 echo ""

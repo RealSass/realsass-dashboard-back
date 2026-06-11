@@ -1,22 +1,10 @@
 // src/auth/auth.controller.ts
 import {
-  Controller,
-  Post,
-  Get,
-  Body,
-  Req,
-  Res,
-  HttpCode,
-  HttpStatus,
-  UseGuards,
+  Controller, Post, Get, Body,
+  Req, Res, HttpCode, HttpStatus, UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthService }       from './auth.service';
 import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
 import { FirebaseSsoDto }    from './dto/firebase-sso.dto';
@@ -27,34 +15,20 @@ import { CurrentUser }       from '../common/decorators/current-user.decorator';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-function setAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+function setAuthCookies(res: Response, access: string, refresh: string): void {
   const base = {
     httpOnly: true,
     secure:   IS_PROD,
     sameSite: IS_PROD ? ('none' as const) : ('lax' as const),
   };
-
-  res.cookie('access_token', accessToken, {
-    ...base,
-    path:   '/',
-    maxAge: 15 * 60 * 1000,
-  });
-
-  res.cookie('refresh_token', refreshToken, {
-    ...base,
-    path:   '/api/v1/auth/refresh',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+  res.cookie('access_token',  access,  { ...base, path: '/',                        maxAge: 15 * 60 * 1000 });
+  res.cookie('refresh_token', refresh, { ...base, path: '/api/v1/auth/refresh',     maxAge: 7 * 24 * 60 * 60 * 1000 });
 }
 
 function clearAuthCookies(res: Response): void {
-  const opts = {
-    httpOnly: true,
-    secure:   IS_PROD,
-    sameSite: IS_PROD ? ('none' as const) : ('lax' as const),
-  };
-  res.clearCookie('access_token',  { ...opts, path: '/' });
-  res.clearCookie('refresh_token', { ...opts, path: '/api/v1/auth/refresh' });
+  const base = { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? ('none' as const) : ('lax' as const) };
+  res.clearCookie('access_token',  { ...base, path: '/' });
+  res.clearCookie('refresh_token', { ...base, path: '/api/v1/auth/refresh' });
 }
 
 @ApiTags('auth')
@@ -65,8 +39,7 @@ export class AuthController {
   @Public()
   @Post('firebase-sso')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'SSO con Firebase ID Token → JWT + cookies' })
-  @ApiResponse({ status: 200, description: 'Login exitoso' })
+  @ApiOperation({ summary: 'Firebase ID Token → JWT propio + cookies HttpOnly' })
   async firebaseSso(
     @Body() dto: FirebaseSsoDto,
     @Res({ passthrough: true }) res: Response,
@@ -80,7 +53,7 @@ export class AuthController {
   @Post('sync')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('firebase-jwt')
-  @ApiOperation({ summary: 'Sincronizar usuario con Firebase' })
+  @ApiOperation({ summary: 'Sync usuario con Firebase' })
   async sync(
     @Body() dto: SyncAuthDto,
     @CurrentUser() cu: { uid: string; email: string },
@@ -109,6 +82,12 @@ export class AuthController {
       (req.cookies as Record<string, string> | undefined)?.['refresh_token']
       ?? dto.refreshToken;
 
+    if (!refreshToken) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false, message: 'Refresh token requerido',
+      });
+    }
+
     const result = await this.authService.refresh({ refreshToken });
     setAuthCookies(res, result.accessToken, result.refreshToken);
     return result;
@@ -117,7 +96,6 @@ export class AuthController {
   @Public()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Cerrar sesión' })
   logout(@Res({ passthrough: true }) res: Response) {
     clearAuthCookies(res);
     return { success: true, message: 'Sesión cerrada' };
