@@ -7,12 +7,13 @@ import {
   Inject,
   Logger,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
+import { Reflector }    from '@nestjs/core';
 import type { Request } from 'express';
-import type * as admin from 'firebase-admin';
+import type * as admin  from 'firebase-admin';
 import { FIREBASE_ADMIN } from '../../firebase/firebase.module';
+import { IS_PUBLIC_KEY }  from '../guards/firebase-auth.guard';
 
-export const IS_PUBLIC_KEY = 'isPublic';
+export { IS_PUBLIC_KEY };
 
 @Injectable()
 export class FirebaseAuthGuard implements CanActivate {
@@ -24,7 +25,6 @@ export class FirebaseAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // Rutas marcadas con @Public() pasan sin auth
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -32,23 +32,17 @@ export class FirebaseAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<Request>();
-    const token = this.extractToken(request);
+    const token   = this.extractToken(request);
 
-    if (!token) {
-      throw new UnauthorizedException('Token de autenticación requerido');
-    }
-
-    if (!this.firebase) {
-      throw new UnauthorizedException('Firebase no configurado en este entorno');
-    }
+    if (!token) throw new UnauthorizedException('Token de autenticación requerido');
+    if (!this.firebase) throw new UnauthorizedException('Firebase no configurado');
 
     try {
       const decoded = await this.firebase.auth().verifyIdToken(token, true);
-      // Inyectar el decoded token en el request para uso posterior
       (request as any).firebaseUser = decoded;
       (request as any).user = {
-        uid: decoded.uid,
-        email: decoded.email ?? '',
+        uid:         decoded.uid,
+        email:       decoded.email ?? '',
         firebaseUid: decoded.uid,
       };
       return true;
@@ -59,7 +53,14 @@ export class FirebaseAuthGuard implements CanActivate {
   }
 
   private extractToken(request: Request): string | null {
+    // 1. Authorization: Bearer <token>
     const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    return type === 'Bearer' && token ? token : null;
+    if (type === 'Bearer' && token) return token;
+
+    // 2. Cookie access_token (para requests cross-domain con credentials)
+    const cookie = request.cookies?.['access_token'] as string | undefined;
+    if (cookie) return cookie;
+
+    return null;
   }
 }

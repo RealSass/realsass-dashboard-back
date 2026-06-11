@@ -1,255 +1,36 @@
 #!/usr/bin/env bash
 # =============================================================================
-# fix-add-refresh.sh
-# Agrega POST /api/v1/auth/refresh al dashboard-back
-# USO: cd <raiz-de-dashboard-back> && bash fix-add-refresh.sh
+# fix-cookies-dashboard-back.sh
+# Repo: real-dashboard-back (NestJS)
+#
+# CAMBIO: POST /auth/firebase-sso además de devolver los tokens en el body,
+# los escribe como cookies HttpOnly para que el browser las envíe
+# automáticamente al dashboard-front cross-domain.
+#
+# COOKIES EMITIDAS:
+#   access_token  → JWT 15min  — HttpOnly, Secure, SameSite=None
+#   refresh_token → JWT 7d     — HttpOnly, Secure, SameSite=None, Path=/api/v1/auth/refresh
+#
+# SameSite=None; Secure es requerido para cross-domain (subdominios distintos).
+# El body sigue devolviendo los tokens para compatibilidad con código existente.
+#
+# ARCHIVOS MODIFICADOS:
+#   src/auth/auth.controller.ts  — setea las cookies en la response
+#   src/main.ts                  — habilita credentials en CORS
 # =============================================================================
 set -euo pipefail
-GREEN='\033[0;32m'; BLUE='\033[0;34m'; NC='\033[0m'
-ok()   { echo -e "${GREEN}  ✓  $*${NC}"; }
-step() { echo -e "\n${BLUE}── $* ──────────────────────────────${NC}"; }
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}✓${NC} $1"; }
+step() { echo -e "\n${YELLOW}▶${NC} $1"; }
 
-echo -e "${BLUE}"
-echo "╔══════════════════════════════════════════╗"
-echo "║  dashboard-back — POST /auth/refresh     ║"
-echo "╚══════════════════════════════════════════╝"
-echo -e "${NC}"
+[ -f "package.json" ] || { echo "Ejecutá desde el root de real-dashboard-back"; exit 1; }
+[ -f "src/auth/auth.controller.ts" ] || { echo "No encontré src/auth/auth.controller.ts"; exit 1; }
 
-# ─── 1. DTO ──────────────────────────────────────────────────────────────────
-step "1/3  src/auth/dto/refresh-token.dto.ts"
-cat > src/auth/dto/refresh-token.dto.ts << 'EOF'
-// src/auth/dto/refresh-token.dto.ts
-import { IsString, IsNotEmpty } from 'class-validator';
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. src/auth/auth.controller.ts
+# ─────────────────────────────────────────────────────────────────────────────
+step "Reescribiendo src/auth/auth.controller.ts"
 
-export class RefreshTokenDto {
-  @IsString()
-  @IsNotEmpty()
-  refreshToken: string;
-}
-EOF
-ok "refresh-token.dto.ts"
-
-# ─── 2. Método refresh en auth.service.ts ────────────────────────────────────
-step "2/3  src/auth/auth.service.ts — agregar refresh()"
-cat > src/auth/auth.service.ts << 'EOF'
-// src/auth/auth.service.ts
-import {
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-  ForbiddenException,
-  Inject,
-  Logger,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service';
-import { FIREBASE_ADMIN } from '../firebase/firebase.module';
-import type * as admin from 'firebase-admin';
-import { SyncAuthDto } from './dto/sync-auth.dto';
-import { FirebaseSsoDto } from './dto/firebase-sso.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
-
-@Injectable()
-export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
-    private readonly jwtService: JwtService,
-    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
-  ) {}
-
-  /** POST /api/v1/auth/sync */
-  async sync(dto: SyncAuthDto) {
-    const user = await this.prisma.user.upsert({
-      where: { firebaseUid: dto.firebaseUid },
-      create: {
-        firebaseUid:   dto.firebaseUid,
-        firebaseEmail: dto.email,
-        email:         dto.email,
-        nombre:        dto.nombre ?? dto.email.split('@')[0],
-        role:          'AGENTE',
-      },
-      update: {
-        firebaseEmail: dto.email,
-        email:         dto.email,
-        ...(dto.nombre && { nombre: dto.nombre }),
-      },
-      select: {
-        id: true, email: true, nombre: true, role: true,
-        firebaseUid: true, isActive: true, createdAt: true,
-      },
-    });
-
-    await this.audit.log({
-      action:     'auth.sync',
-      entityType: 'User',
-      entityId:   user.id,
-      userId:     user.id,
-      payload:    { email: dto.email },
-    });
-
-    return user;
-  }
-
-  /** GET /api/v1/auth/me */
-  async me(firebaseUid: string) {
-    const user = await this.prisma.user.findUnique({
-      where:  { firebaseUid },
-      select: {
-        id: true, email: true, nombre: true, role: true,
-        firebaseUid: true, isActive: true, createdAt: true,
-      },
-    });
-
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado. Llamar a /auth/sync primero.');
-    }
-
-    return user;
-  }
-
-  /** POST /api/v1/auth/firebase-sso */
-  async firebaseSso(dto: FirebaseSsoDto): Promise<{
-    accessToken:  string;
-    refreshToken: string;
-    user: { id: string; email: string; nombre: string; role: string };
-  }> {
-    if (!this.firebase) {
-      throw new UnauthorizedException('Firebase no configurado en este entorno');
-    }
-
-    let decoded: admin.auth.DecodedIdToken;
-    try {
-      decoded = await this.firebase.auth().verifyIdToken(dto.firebaseIdToken, true);
-    } catch (err) {
-      this.logger.warn(`SSO token inválido: ${(err as Error).message}`);
-      throw new UnauthorizedException('Token de Firebase inválido o expirado');
-    }
-
-    const uid   = decoded.uid;
-    const email = decoded.email ?? '';
-
-    let user = await this.prisma.user.findFirst({
-      where:  { OR: [{ firebaseUid: uid }, { email }] },
-      select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
-    });
-
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          firebaseUid:   uid,
-          firebaseEmail: email,
-          email,
-          nombre: decoded.name ?? email.split('@')[0] ?? 'Usuario',
-          role:   'AGENTE',
-        },
-        select: { id: true, email: true, nombre: true, role: true, isActive: true, firebaseUid: true },
-      });
-      this.logger.log(`SSO: nuevo usuario — ${email}`);
-    } else if (!user.firebaseUid) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data:  { firebaseUid: uid, firebaseEmail: email },
-      });
-    }
-
-    if (!user.isActive) {
-      throw new ForbiddenException('Cuenta desactivada. Contactá al administrador.');
-    }
-
-    const payload = { sub: user.id, email: user.email, nombre: user.nombre, role: user.role };
-
-    const accessToken = this.jwtService.sign(payload, {
-      secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
-      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
-    });
-
-    const refreshToken = this.jwtService.sign(payload, {
-      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
-      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
-    });
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data:  { refreshToken },
-    });
-
-    await this.audit.log({
-      action:     'auth.firebase_sso',
-      entityType: 'User',
-      entityId:   user.id,
-      userId:     user.id,
-      payload:    { email: user.email, role: user.role },
-    });
-
-    this.logger.log(`SSO exitoso — ${user.email} (${user.role})`);
-
-    return { accessToken, refreshToken, user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role } };
-  }
-
-  /**
-   * POST /api/v1/auth/refresh
-   * El dashboard-front llama este endpoint cuando el accessToken expira.
-   * Verifica el refreshToken, emite un nuevo par de tokens.
-   */
-  async refresh(dto: RefreshTokenDto): Promise<{
-    accessToken:  string;
-    refreshToken: string;
-  }> {
-    // 1. Verificar que el refreshToken sea válido
-    let payload: { sub: string; email: string; nombre?: string; role: string };
-    try {
-      payload = this.jwtService.verify(dto.refreshToken, {
-        secret: process.env['JWT_REFRESH_SECRET'] ?? 'change_me_refresh',
-      });
-    } catch {
-      throw new UnauthorizedException('Refresh token inválido o expirado');
-    }
-
-    // 2. Verificar que el usuario exista y el token coincida en DB
-    const user = await this.prisma.user.findFirst({
-      where:  { id: payload.sub, refreshToken: dto.refreshToken },
-      select: { id: true, email: true, nombre: true, role: true, isActive: true },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('Refresh token revocado o usuario no encontrado');
-    }
-
-    if (!user.isActive) {
-      throw new ForbiddenException('Cuenta desactivada.');
-    }
-
-    // 3. Emitir nuevos tokens
-    const newPayload = { sub: user.id, email: user.email, nombre: user.nombre, role: user.role };
-
-    const accessToken = this.jwtService.sign(newPayload, {
-      secret:    process.env['JWT_ACCESS_SECRET']     ?? 'change_me_access',
-      expiresIn: (process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m') as any,
-    });
-
-    const refreshToken = this.jwtService.sign(newPayload, {
-      secret:    process.env['JWT_REFRESH_SECRET']     ?? 'change_me_refresh',
-      expiresIn: (process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d') as any,
-    });
-
-    // 4. Rotar el refresh token en DB
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data:  { refreshToken },
-    });
-
-    return { accessToken, refreshToken };
-  }
-}
-EOF
-ok "auth.service.ts — refresh() agregado"
-
-# ─── 3. Endpoint en auth.controller.ts ───────────────────────────────────────
-step "3/3  src/auth/auth.controller.ts — agregar POST /auth/refresh"
 cat > src/auth/auth.controller.ts << 'EOF'
 // src/auth/auth.controller.ts
 import {
@@ -257,67 +38,349 @@ import {
   Post,
   Get,
   Body,
+  Req,
+  Res,
   HttpCode,
   HttpStatus,
-  Request,
+  UseGuards,
 } from '@nestjs/common';
-import { AuthService } from './auth.service';
-import { SyncAuthDto } from './dto/sync-auth.dto';
-import { FirebaseSsoDto } from './dto/firebase-sso.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { Public } from '../common/decorators/public.decorator';
-import type { Request as ExpressRequest } from 'express';
+import type { Request, Response } from 'express';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
+import { AuthService }        from './auth.service';
+import { FirebaseAuthGuard }  from './guards/firebase-auth.guard';
+import { FirebaseSsoDto }     from './dto/firebase-sso.dto';
+import { SyncAuthDto }        from './dto/sync-auth.dto';
+import { RefreshTokenDto }    from './dto/refresh-token.dto';
+import { Public }             from '../common/decorators/public.decorator';
+import { CurrentUser }        from '../common/decorators/current-user.decorator';
 
+// ─── Helpers de cookie ────────────────────────────────────────────────────────
+
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+/**
+ * Escribe access_token y refresh_token como cookies HttpOnly.
+ * SameSite=None; Secure es requerido para cross-domain (Railway subdominios).
+ */
+function setAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+  const base = {
+    httpOnly: true,
+    secure:   IS_PROD,           // solo HTTPS en producción
+    sameSite: IS_PROD            // cross-domain en prod, lax en dev
+      ? ('none' as const)
+      : ('lax'  as const),
+    path: '/',
+  };
+
+  res.cookie('access_token', accessToken, {
+    ...base,
+    maxAge: 15 * 60 * 1000,      // 15 minutos
+  });
+
+  res.cookie('refresh_token', refreshToken, {
+    ...base,
+    maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 días
+    path:   '/api/v1/auth/refresh',    // solo accesible en el endpoint de refresh
+  });
+}
+
+function clearAuthCookies(res: Response): void {
+  const opts = {
+    httpOnly: true,
+    secure:   IS_PROD,
+    sameSite: IS_PROD ? ('none' as const) : ('lax' as const),
+  };
+  res.clearCookie('access_token',  { ...opts, path: '/' });
+  res.clearCookie('refresh_token', { ...opts, path: '/api/v1/auth/refresh' });
+}
+
+// ─── Controller ───────────────────────────────────────────────────────────────
+
+@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  /** POST /api/v1/auth/sync */
-  @Post('sync')
-  @HttpCode(HttpStatus.OK)
-  sync(@Body() dto: SyncAuthDto) {
-    return this.authService.sync(dto);
-  }
-
-  /** GET /api/v1/auth/me */
-  @Get('me')
-  me(@Request() req: ExpressRequest) {
-    const firebaseUid = (req as any).user?.firebaseUid as string;
-    return this.authService.me(firebaseUid);
-  }
-
-  /** POST /api/v1/auth/firebase-sso */
+  /**
+   * POST /api/v1/auth/firebase-sso
+   * Intercambia un Firebase ID Token por JWT propio del dashboard.
+   * Escribe los tokens como cookies HttpOnly (cross-domain) Y los devuelve
+   * en el body para compatibilidad con clientes que usan localStorage.
+   */
   @Public()
   @Post('firebase-sso')
   @HttpCode(HttpStatus.OK)
-  firebaseSso(@Body() dto: FirebaseSsoDto) {
-    return this.authService.firebaseSso(dto);
+  @ApiOperation({ summary: 'SSO con Firebase ID Token → JWT propio' })
+  @ApiResponse({ status: 200, description: 'Login exitoso' })
+  @ApiResponse({ status: 401, description: 'Token Firebase inválido' })
+  async firebaseSso(
+    @Body() dto: FirebaseSsoDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.firebaseSso(dto);
+    // Escribir cookies HttpOnly para el browser
+    setAuthCookies(res, result.accessToken, result.refreshToken);
+    // Devolver también en body (compatibilidad con código que lee localStorage)
+    return result;
+  }
+
+  /**
+   * POST /api/v1/auth/sync
+   * Crea o actualiza el usuario en la DB del dashboard.
+   * Requiere Firebase token en Authorization header.
+   */
+  @UseGuards(FirebaseAuthGuard)
+  @Post('sync')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('firebase-jwt')
+  @ApiOperation({ summary: 'Sincronizar usuario con Firebase' })
+  async sync(
+    @Body() dto: SyncAuthDto,
+    @CurrentUser() currentUser: { uid: string; email: string },
+  ) {
+    return this.authService.sync({
+      ...dto,
+      firebaseUid: currentUser.uid,
+      email:       dto.email || currentUser.email,
+    });
+  }
+
+  /**
+   * GET /api/v1/auth/me
+   * Retorna el perfil del usuario autenticado.
+   * Acepta JWT en Authorization header O en cookie access_token.
+   */
+  @UseGuards(FirebaseAuthGuard)
+  @Get('me')
+  @ApiBearerAuth('firebase-jwt')
+  @ApiOperation({ summary: 'Perfil del usuario autenticado' })
+  async me(@CurrentUser() currentUser: { uid: string }) {
+    return this.authService.me(currentUser.uid);
   }
 
   /**
    * POST /api/v1/auth/refresh
-   * Ruta pública. El dashboard-front renueva tokens cuando expira el accessToken.
+   * Renueva el access token usando el refresh token.
+   * Lee el refresh_token de la cookie O del body.
    */
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refresh(dto);
+  @ApiOperation({ summary: 'Renovar access token' })
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req()  req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Preferir cookie sobre body
+    const refreshToken = (req.cookies?.['refresh_token'] as string | undefined)
+      ?? dto.refreshToken;
+
+    const result = await this.authService.refresh({ refreshToken });
+    setAuthCookies(res, result.accessToken, result.refreshToken);
+    return result;
+  }
+
+  /**
+   * POST /api/v1/auth/logout
+   * Limpia las cookies de auth.
+   */
+  @Public()
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cerrar sesión' })
+  logout(@Res({ passthrough: true }) res: Response) {
+    clearAuthCookies(res);
+    return { success: true, message: 'Sesión cerrada' };
   }
 }
 EOF
-ok "auth.controller.ts — POST /auth/refresh agregado"
+ok "src/auth/auth.controller.ts"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. src/auth/guards/firebase-auth.guard.ts
+#    Leer JWT de cookie access_token además de Authorization header
+# ─────────────────────────────────────────────────────────────────────────────
+step "Actualizando src/auth/guards/firebase-auth.guard.ts"
+
+cat > src/auth/guards/firebase-auth.guard.ts << 'EOF'
+// src/auth/guards/firebase-auth.guard.ts
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  UnauthorizedException,
+  Inject,
+  Logger,
+} from '@nestjs/common';
+import { Reflector }    from '@nestjs/core';
+import type { Request } from 'express';
+import type * as admin  from 'firebase-admin';
+import { FIREBASE_ADMIN } from '../../firebase/firebase.module';
+import { IS_PUBLIC_KEY }  from '../guards/firebase-auth.guard';
+
+export { IS_PUBLIC_KEY };
+
+@Injectable()
+export class FirebaseAuthGuard implements CanActivate {
+  private readonly logger = new Logger(FirebaseAuthGuard.name);
+
+  constructor(
+    @Inject(FIREBASE_ADMIN) private readonly firebase: admin.app.App | null,
+    private readonly reflector: Reflector,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
+    const request = context.switchToHttp().getRequest<Request>();
+    const token   = this.extractToken(request);
+
+    if (!token) throw new UnauthorizedException('Token de autenticación requerido');
+    if (!this.firebase) throw new UnauthorizedException('Firebase no configurado');
+
+    try {
+      const decoded = await this.firebase.auth().verifyIdToken(token, true);
+      (request as any).firebaseUser = decoded;
+      (request as any).user = {
+        uid:         decoded.uid,
+        email:       decoded.email ?? '',
+        firebaseUid: decoded.uid,
+      };
+      return true;
+    } catch (err) {
+      this.logger.warn(`Token inválido: ${(err as Error).message}`);
+      throw new UnauthorizedException('Token inválido o expirado');
+    }
+  }
+
+  private extractToken(request: Request): string | null {
+    // 1. Authorization: Bearer <token>
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    if (type === 'Bearer' && token) return token;
+
+    // 2. Cookie access_token (para requests cross-domain con credentials)
+    const cookie = request.cookies?.['access_token'] as string | undefined;
+    if (cookie) return cookie;
+
+    return null;
+  }
+}
+EOF
+ok "src/auth/guards/firebase-auth.guard.ts"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. src/main.ts — habilitar cookies en CORS
+# ─────────────────────────────────────────────────────────────────────────────
+step "Actualizando src/main.ts para habilitar credentials en CORS"
+
+# Verificar que existe main.ts
+[ -f "src/main.ts" ] || { echo "No encontré src/main.ts"; exit 1; }
+
+# Backup
+cp src/main.ts src/main.ts.bak
+
+# Reemplazar la config de CORS — buscar el bloque enableCors y actualizarlo
+cat > src/main.ts << 'EOF'
+// src/main.ts
+import { NestFactory }           from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import { ConfigService }          from '@nestjs/config';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import * as cookieParser          from 'cookie-parser';
+import { AppModule }              from './app.module';
+import { HttpExceptionFilter }    from './common/filters/http-exception.filter';
+import { ResponseInterceptor }    from './common/interceptors/response.interceptor';
+
+async function bootstrap() {
+  const app    = await NestFactory.create(AppModule);
+  const config = app.get(ConfigService);
+  const logger = new Logger('Bootstrap');
+
+  // ── Cookie parser (necesario para leer req.cookies) ───────────────────────
+  app.use(cookieParser());
+
+  // ── Prefijo global ────────────────────────────────────────────────────────
+  app.setGlobalPrefix('api/v1');
+
+  // ── CORS — credentials=true para que el browser envíe cookies cross-domain
+  const allowedOrigins = (config.get<string>('ALLOWED_ORIGINS', '') || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+
+  app.enableCors({
+    origin: allowedOrigins.length > 0
+      ? allowedOrigins
+      : true,               // en dev sin config, permitir todo
+    methods:          ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders:   ['Content-Type', 'Authorization', 'x-organization-id'],
+    credentials:      true, // ← REQUERIDO para que el browser envíe cookies
+  });
+
+  // ── Pipes ─────────────────────────────────────────────────────────────────
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist:            true,
+    forbidNonWhitelisted: true,
+    transform:            true,
+    transformOptions:     { enableImplicitConversion: true },
+  }));
+
+  // ── Filters & interceptors ────────────────────────────────────────────────
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new ResponseInterceptor());
+
+  // ── Swagger ───────────────────────────────────────────────────────────────
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Dashboard API')
+    .setDescription('Real Estate Dashboard — API docs')
+    .setVersion('1.0')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'firebase-jwt')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/v1/docs', app, document);
+
+  const port = config.get<number>('PORT', 3000);
+  await app.listen(port);
+
+  logger.log(`🚀 Dashboard API corriendo en: http://localhost:${port}`);
+  logger.log(`🔥 Firebase Auth SSO activo`);
+  logger.log(`📡 Prefix: /api/v1`);
+  logger.log(`🍪 Cookie-based auth habilitado`);
+}
+
+bootstrap();
+EOF
+ok "src/main.ts"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Instalar cookie-parser
+# ─────────────────────────────────────────────────────────────────────────────
+step "Instalando cookie-parser"
+pnpm add cookie-parser
+pnpm add -D @types/cookie-parser
+ok "cookie-parser instalado"
 
 echo ""
-echo -e "${GREEN}══ listo ═════════════════════════════════════════════════════${NC}"
-echo "  Endpoints disponibles:"
-echo "    POST /api/v1/auth/sync"
-echo "    GET  /api/v1/auth/me"
-echo "    POST /api/v1/auth/firebase-sso"
-echo "    POST /api/v1/auth/refresh"
+echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  Script completado${NC}"
+echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
 echo ""
-echo "  Variable requerida en Railway → dashboard-front:"
-echo "    NEXT_PUBLIC_API_URL=https://realsass-dashboard-back-production.up.railway.app/api/v1"
+echo "  Archivos modificados:"
+echo "    • src/auth/auth.controller.ts       (cookies en firebase-sso y refresh)"
+echo "    • src/auth/guards/firebase-auth.guard.ts (lee cookie además de header)"
+echo "    • src/main.ts                       (cookie-parser + CORS credentials)"
 echo ""
-echo "  → pnpm run build"
+echo "  Variable requerida en Railway del dashboard-back:"
+echo "    ALLOWED_ORIGINS=https://realsass-dashboard-front-production.up.railway.app,https://realsass-sass-front-production.up.railway.app"
 echo ""
